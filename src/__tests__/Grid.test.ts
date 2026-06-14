@@ -245,4 +245,32 @@ describe('Grid', () => {
       expect(grid.getLowestOccupiedY()).toBe(expected)
     })
   })
+
+  // --- findMatchesAll ---
+
+  describe('findMatchesAll', () => {
+    it('returns single-cell set when no neighbors match', () => {
+      grid.setHat({ row: 0, col: 0 }, HatType.TOP_HAT)
+      grid.setHat({ row: 0, col: 1 }, HatType.FEDORA)
+      const result = grid.findMatchesAll({ row: 0, col: 0 }, HatType.TOP_HAT)
+      expect(result.size).toBe(1)
+    })
+
+    it('returns group of 2 (below MIN_MATCH_COUNT) unlike findMatches', () => {
+      grid.setHat({ row: 0, col: 0 }, HatType.WITCH)
+      grid.setHat({ row: 0, col: 1 }, HatType.WITCH)
+      const all = grid.findMatchesAll({ row: 0, col: 0 }, HatType.WITCH)
+      const strict = grid.findMatches({ row: 0, col: 0 }, HatType.WITCH)
+      expect(all.size).toBe(2)
+      expect(strict.size).toBe(0) // below minimum
+    })
+
+    it('returns same result as findMatches when group >= MIN_MATCH_COUNT', () => {
+      for (let c = 0; c < 4; c++) grid.setHat({ row: 0, col: c }, HatType.COWBOY)
+      const all = grid.findMatchesAll({ row: 0, col: 1 }, HatType.COWBOY)
+      const strict = grid.findMatches({ row: 0, col: 1 }, HatType.COWBOY)
+      expect(all.size).toBe(4)
+      expect(strict.size).toBe(4)
+    })
+  })
 })

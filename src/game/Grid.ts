@@ -140,6 +140,15 @@ export class Grid {
 
   /** BFS flood-fill: find all connected hats of the same type starting at pos */
   findMatches(startPos: GridPos, type: HatType): Set<string> {
+    const group = this.findMatchesAll(startPos, type)
+    return group.size >= MIN_MATCH_COUNT ? group : new Set<string>()
+  }
+
+  /**
+   * Same BFS as findMatches but always returns the full connected group,
+   * even if it's smaller than MIN_MATCH_COUNT. Used for targeting preview.
+   */
+  findMatchesAll(startPos: GridPos, type: HatType): Set<string> {
     const visited = new Set<string>()
     const queue: GridPos[] = [startPos]
     visited.add(this.key(startPos))
@@ -155,7 +164,7 @@ export class Grid {
       }
     }
 
-    return visited.size >= MIN_MATCH_COUNT ? visited : new Set<string>()
+    return visited
   }
 
   /**

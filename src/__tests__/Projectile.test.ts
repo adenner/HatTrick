@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { Projectile, computeAimLine } from '../game/Projectile'
+import { Projectile, computeAimLine, simulateLanding } from '../game/Projectile'
 import { Grid } from '../game/Grid'
-import { HatType, HAT_RADIUS, CANVAS_WIDTH } from '../types'
+import { HatType, HAT_RADIUS, CANVAS_WIDTH, INITIAL_ROWS } from '../types'
 
 describe('Projectile', () => {
   describe('constructor velocity', () => {
@@ -133,5 +133,43 @@ describe('computeAimLine', () => {
   it('never exceeds canvas bounds', () => {
     const pts = computeAimLine(300, 600, 70, CANVAS_WIDTH, 6)
     expect(pts.every(p => p.x >= 0 && p.x <= CANVAS_WIDTH)).toBe(true)
+  })
+})
+
+describe('simulateLanding', () => {
+  it('returns a GridPos for a straight-up shot into a populated grid', () => {
+    const grid = new Grid()
+    grid.fillInitialGrid(INITIAL_ROWS)
+    const result = simulateLanding(300, 640, 0, grid, CANVAS_WIDTH)
+    expect(result).not.toBeNull()
+    expect(result?.row).toBeGreaterThanOrEqual(0)
+    expect(result?.col).toBeGreaterThanOrEqual(0)
+  })
+
+  it('returns a GridPos (ceiling snap) when grid is empty', () => {
+    const grid = new Grid()
+    const result = simulateLanding(300, 640, 0, grid, CANVAS_WIDTH)
+    expect(result).not.toBeNull()
+    // Should snap to row 0 with no hats to hit
+    expect(result?.row).toBe(0)
+  })
+
+  it('landing cell is not already occupied', () => {
+    const grid = new Grid()
+    grid.fillInitialGrid(INITIAL_ROWS)
+    const result = simulateLanding(300, 640, 15, grid, CANVAS_WIDTH)
+    if (result) {
+      expect(grid.hasHat(result)).toBe(false)
+    }
+  })
+
+  it('returns null or valid pos for extreme angles', () => {
+    const grid = new Grid()
+    grid.fillInitialGrid(INITIAL_ROWS)
+    // Near-horizontal shot — may or may not find a cell within step limit
+    const result = simulateLanding(300, 640, 77, grid, CANVAS_WIDTH)
+    if (result !== null) {
+      expect(result.row).toBeGreaterThanOrEqual(0)
+    }
   })
 })

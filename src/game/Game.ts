@@ -1,6 +1,8 @@
 import {
   GamePhase,
   FallingHat,
+  GridPos,
+  CANVAS_WIDTH,
   CANVAS_HEIGHT,
   HAT_RADIUS,
   DANGER_ROW_Y,
@@ -9,7 +11,7 @@ import {
 } from '../types'
 import { Grid } from './Grid'
 import { Shooter } from './Shooter'
-import { Projectile } from './Projectile'
+import { Projectile, simulateLanding } from './Projectile'
 import { calculateShotScore } from './scoring'
 import { HatRenderer } from '../render/HatRenderer'
 import { Renderer, RenderState } from '../render/Renderer'
@@ -28,6 +30,10 @@ export class Game {
   private highScore = 0
   private combo = 1
   private fallingHats: FallingHat[] = []
+
+  private targetingEnabled = false
+  private targetCell: GridPos | null = null
+  private targetGroup: Set<string> = new Set()
 
   private readonly renderer: Renderer
   private readonly hatRenderer: HatRenderer
@@ -173,6 +179,8 @@ export class Game {
     }
 
     this.checkLoss()
+    // Recompute targeting for the next shot after grid has changed
+    this.recomputeTarget()
   }
 
   private checkLoss(): void {
@@ -200,11 +208,37 @@ export class Game {
     this.shooter.aimAt(x, y)
     this.projectile = this.shooter.fire()
     this.sound.play('shoot')
+    // Clear targeting preview while projectile is in flight
+    this.targetCell = null
+    this.targetGroup = new Set()
   }
 
   private handleAim(x: number, y: number): void {
     if (this.phase !== 'playing' || this.projectile?.active) return
     this.shooter.aimAt(x, y)
+    this.recomputeTarget()
+  }
+
+  private recomputeTarget(): void {
+    if (!this.targetingEnabled || this.projectile?.active) {
+      this.targetCell = null
+      this.targetGroup = new Set()
+      return
+    }
+
+    this.targetCell = simulateLanding(
+      this.shooter.x, this.shooter.y, this.shooter.angleDeg,
+      this.grid, CANVAS_WIDTH,
+    )
+
+    if (this.targetCell) {
+      // Temporarily place the hat to compute the would-be match group
+      this.grid.setHat(this.targetCell, this.shooter.currentType)
+      this.targetGroup = this.grid.findMatchesAll(this.targetCell, this.shooter.currentType)
+      this.grid.removeHat(this.targetCell)
+    } else {
+      this.targetGroup = new Set()
+    }
   }
 
   private handleKey(key: string): void {
@@ -219,6 +253,10 @@ export class Game {
     if (key === 'm') {
       this.sound.toggleMute()
     }
+    if (key === 'c') {
+      this.targetingEnabled = !this.targetingEnabled
+      this.recomputeTarget()
+    }
   }
 
   private startNewGame(): void {
@@ -229,6 +267,8 @@ export class Game {
     this.score = 0
     this.combo = 1
     this.fallingHats = []
+    this.targetCell = null
+    this.targetGroup = new Set()
     this.phase = 'playing'
     this.lastTimestamp = performance.now()
   }
@@ -244,6 +284,9 @@ export class Game {
       highScore: this.highScore,
       combo: this.combo,
       muted: this.sound.muted,
+      targeting: this.targetingEnabled,
+      targetCell: this.targetCell,
+      targetGroup: this.targetGroup,
     }
   }
 

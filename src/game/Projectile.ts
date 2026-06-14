@@ -66,6 +66,51 @@ export class Projectile {
 }
 
 /**
+ * Step through projectile physics to find the grid cell where the hat would land.
+ * Uses the same collision logic as the live game loop. Returns null if no landing
+ * cell is found within the step limit (e.g., angle nearly horizontal).
+ */
+export function simulateLanding(
+  startX: number,
+  startY: number,
+  angleDeg: number,
+  grid: Grid,
+  canvasWidth: number,
+): GridPos | null {
+  const rad = (angleDeg * Math.PI) / 180
+  let x = startX
+  let y = startY
+  let vx = PROJECTILE_SPEED * Math.sin(rad)
+  let vy = -PROJECTILE_SPEED * Math.cos(rad)
+  const MAX_STEPS = 600
+
+  for (let i = 0; i < MAX_STEPS; i++) {
+    x += vx
+    y += vy
+
+    // Wall bounces
+    if (x - HAT_RADIUS < 0) { x = HAT_RADIUS; vx = Math.abs(vx) }
+    if (x + HAT_RADIUS > canvasWidth) { x = canvasWidth - HAT_RADIUS; vx = -Math.abs(vx) }
+
+    // Hat collision — only check hats within 2 rows vertically for speed
+    for (const hat of grid.iterHats()) {
+      const { x: hx, y: hy } = grid.toPixel(hat.pos)
+      if (Math.abs(hy - y) > HAT_DIAMETER) continue
+      if (Math.hypot(x - hx, y - hy) < HAT_DIAMETER) {
+        return grid.findLandingCell(hat.pos, x, y)
+      }
+    }
+
+    // Ceiling collision
+    if (y - HAT_RADIUS <= 0) {
+      return grid.snapToGrid(x, HAT_RADIUS)
+    }
+  }
+
+  return null
+}
+
+/**
  * Compute aim line segments for the trajectory preview.
  * Returns an array of points forming the polyline (including start point).
  */

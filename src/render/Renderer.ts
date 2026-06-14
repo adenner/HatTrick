@@ -1,9 +1,11 @@
 import {
   GamePhase,
   FallingHat,
+  GridPos,
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
   DANGER_ROW_Y,
+  MIN_MATCH_COUNT,
 } from '../types'
 import { Grid } from '../game/Grid'
 import { Shooter } from '../game/Shooter'
@@ -20,6 +22,10 @@ export interface RenderState {
   highScore: number
   combo: number
   muted: boolean
+  targeting: boolean
+  targetCell: GridPos | null
+  /** Keys of all same-type hats connected to the target cell (incl. target itself) */
+  targetGroup: Set<string>
 }
 
 export class Renderer {
@@ -80,12 +86,15 @@ export class Renderer {
           CANVAS_WIDTH,
         )
         this.drawAimLine(aimLine)
+        if (state.targeting) {
+          this.drawTargeting(state.grid, state.shooter, state.targetCell, state.targetGroup)
+        }
       }
       this.drawShooter(state.shooter)
       if (state.projectile?.active) {
         this.drawProjectile(state.projectile)
       }
-      this.drawHUD(state.score, state.highScore, state.combo, state.muted)
+      this.drawHUD(state.score, state.highScore, state.combo, state.muted, state.targeting)
     }
 
     if (state.phase === 'paused') {
@@ -217,7 +226,82 @@ export class Renderer {
     this.hatRenderer.drawHat(this.ctx, proj.type, proj.x, proj.y)
   }
 
-  private drawHUD(score: number, highScore: number, combo: number, muted: boolean): void {
+  private drawTargeting(
+    grid: Grid,
+    shooter: Shooter,
+    targetCell: GridPos | null,
+    targetGroup: Set<string>,
+  ): void {
+    const { ctx } = this
+    const willPop = targetGroup.size >= MIN_MATCH_COUNT
+    const ringColor = willPop ? 'rgba(80,255,120,0.85)' : 'rgba(255,200,60,0.55)'
+    const glowColor = willPop ? 'rgba(80,255,120,0.3)' : 'rgba(255,200,60,0.15)'
+
+    // Highlight each hat in the connected group
+    for (const key of targetGroup) {
+      // Skip the target cell itself — it'll get the ghost treatment below
+      if (targetCell && key === `${targetCell.row},${targetCell.col}`) continue
+      const [row, col] = key.split(',').map(Number)
+      const { x, y } = grid.toPixel({ row, col })
+
+      ctx.save()
+      ctx.shadowColor = ringColor
+      ctx.shadowBlur = 12
+      ctx.strokeStyle = ringColor
+      ctx.lineWidth = 2.5
+      ctx.beginPath()
+      ctx.arc(x, y, 26, 0, Math.PI * 2)
+      ctx.stroke()
+
+      // Subtle fill tint
+      ctx.fillStyle = glowColor
+      ctx.fill()
+      ctx.restore()
+    }
+
+    // Ghost hat at landing cell
+    if (targetCell) {
+      const { x, y } = grid.toPixel(targetCell)
+
+      // Landing ring
+      ctx.save()
+      ctx.shadowColor = willPop ? 'rgba(80,255,120,0.9)' : 'rgba(255,200,60,0.7)'
+      ctx.shadowBlur = 18
+      ctx.strokeStyle = willPop ? 'rgba(80,255,120,0.9)' : 'rgba(255,200,60,0.8)'
+      ctx.lineWidth = 2.5
+      ctx.setLineDash([4, 4])
+      ctx.beginPath()
+      ctx.arc(x, y, 26, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.setLineDash([])
+      ctx.restore()
+
+      // Ghost hat sprite
+      this.hatRenderer.drawHat(ctx, shooter.currentType, x, y, 0.35)
+
+      // Match count badge
+      const count = targetGroup.size
+      if (count > 0) {
+        const label = willPop ? `✓ ${count}` : `${count}`
+        ctx.save()
+        const badgeX = x + 18
+        const badgeY = y - 20
+
+        ctx.fillStyle = willPop ? 'rgba(30,180,80,0.9)' : 'rgba(160,120,0,0.85)'
+        ctx.beginPath()
+        ctx.roundRect(badgeX - 2, badgeY - 13, label.length * 8 + 4, 16, 4)
+        ctx.fill()
+
+        ctx.fillStyle = '#fff'
+        ctx.font = 'bold 11px monospace'
+        ctx.textAlign = 'left'
+        ctx.fillText(label, badgeX, badgeY)
+        ctx.restore()
+      }
+    }
+  }
+
+  private drawHUD(score: number, highScore: number, combo: number, muted: boolean, targeting: boolean): void {
     const { ctx } = this
     ctx.save()
 
@@ -244,11 +328,14 @@ export class Renderer {
       ctx.fillText(`×${combo} COMBO`, 12, 38)
     }
 
-    // Mute indicator
-    ctx.font = '14px monospace'
+    // Mute / targeting indicators (bottom-left)
+    ctx.font = '13px monospace'
     ctx.textAlign = 'left'
-    ctx.fillStyle = muted ? 'rgba(255,80,80,0.8)' : 'rgba(255,255,255,0.3)'
-    ctx.fillText(muted ? '🔇 M' : '🔊 M', 12, CANVAS_HEIGHT - 16)
+    ctx.fillStyle = muted ? 'rgba(255,80,80,0.8)' : 'rgba(255,255,255,0.28)'
+    ctx.fillText(muted ? '🔇 M' : '🔊 M', 12, CANVAS_HEIGHT - 32)
+
+    ctx.fillStyle = targeting ? 'rgba(80,255,120,0.9)' : 'rgba(255,255,255,0.28)'
+    ctx.fillText(targeting ? '🎯 C' : '◎ C', 12, CANVAS_HEIGHT - 16)
 
     ctx.restore()
   }
@@ -289,7 +376,7 @@ export class Renderer {
     ctx.fillStyle = 'rgba(255,255,255,0.35)'
     ctx.font = '13px monospace'
     ctx.fillText('Move mouse to aim · Click to shoot', CANVAS_WIDTH / 2, 480)
-    ctx.fillText('P to pause · M to mute', CANVAS_WIDTH / 2, 500)
+    ctx.fillText('P pause · M mute · C targeting cheat', CANVAS_WIDTH / 2, 500)
 
     ctx.restore()
   }

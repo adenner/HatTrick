@@ -42,12 +42,5 @@ export class Shooter {
     return proj
   }
 
-  /** Velocity components corresponding to current angle */
-  getVelocity(): { vx: number; vy: number } {
-    const rad = (this.angleDeg * Math.PI) / 180
-    return {
-      vx: Math.sin(rad),
-      vy: -Math.cos(rad),
-    }
-  }
+
 }

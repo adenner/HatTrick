@@ -7,7 +7,7 @@ import {
 } from '../types'
 import { Grid } from '../game/Grid'
 import { Shooter } from '../game/Shooter'
-import { Projectile } from '../game/Projectile'
+import { Projectile, computeAimLine } from '../game/Projectile'
 import { HatRenderer } from './HatRenderer'
 
 export interface RenderState {
@@ -15,7 +15,6 @@ export interface RenderState {
   grid: Grid
   shooter: Shooter
   projectile: Projectile | null
-  aimLine: Array<{ x: number; y: number }>
   fallingHats: FallingHat[]
   score: number
   highScore: number
@@ -25,12 +24,36 @@ export interface RenderState {
 export class Renderer {
   private readonly ctx: CanvasRenderingContext2D
   private readonly hatRenderer: HatRenderer
+  private backgroundBitmap: ImageBitmap | null = null
 
   constructor(canvas: HTMLCanvasElement, hatRenderer: HatRenderer) {
     const ctx = canvas.getContext('2d')
     if (!ctx) throw new Error('Could not get 2D context')
     this.ctx = ctx
     this.hatRenderer = hatRenderer
+  }
+
+  /** Pre-render the static background so it can be blitted each frame */
+  async init(): Promise<void> {
+    const offscreen = new OffscreenCanvas(CANVAS_WIDTH, CANVAS_HEIGHT)
+    const ctx = offscreen.getContext('2d')!
+
+    const grad = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT)
+    grad.addColorStop(0, '#0d0d2b')
+    grad.addColorStop(1, '#1a1a3a')
+    ctx.fillStyle = grad
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+
+    ctx.fillStyle = 'rgba(255,255,255,0.03)'
+    for (let y = 20; y < CANVAS_HEIGHT; y += 40) {
+      for (let x = 20; x < CANVAS_WIDTH; x += 40) {
+        ctx.beginPath()
+        ctx.arc(x, y, 1, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+
+    this.backgroundBitmap = await createImageBitmap(offscreen)
   }
 
   render(state: RenderState): void {
@@ -48,7 +71,15 @@ export class Renderer {
     this.drawFallingHats(state.fallingHats)
 
     if (state.phase === 'playing' || state.phase === 'paused') {
-      this.drawAimLine(state.aimLine)
+      if (!state.projectile?.active) {
+        const aimLine = computeAimLine(
+          state.shooter.x,
+          state.shooter.y,
+          state.shooter.angleDeg,
+          CANVAS_WIDTH,
+        )
+        this.drawAimLine(aimLine)
+      }
       this.drawShooter(state.shooter)
       if (state.projectile?.active) {
         this.drawProjectile(state.projectile)
@@ -66,22 +97,13 @@ export class Renderer {
   }
 
   private drawBackground(): void {
-    const { ctx } = this
-    const grad = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT)
-    grad.addColorStop(0, '#0d0d2b')
-    grad.addColorStop(1, '#1a1a3a')
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
-
-    // Subtle grid dots
-    ctx.fillStyle = 'rgba(255,255,255,0.03)'
-    for (let y = 20; y < CANVAS_HEIGHT; y += 40) {
-      for (let x = 20; x < CANVAS_WIDTH; x += 40) {
-        ctx.beginPath()
-        ctx.arc(x, y, 1, 0, Math.PI * 2)
-        ctx.fill()
-      }
+    if (this.backgroundBitmap) {
+      this.ctx.drawImage(this.backgroundBitmap, 0, 0)
+      return
     }
+    // Fallback before init() completes
+    this.ctx.fillStyle = '#0d0d2b'
+    this.ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
   }
 
   private drawDangerLine(): void {
@@ -104,7 +126,7 @@ export class Renderer {
   }
 
   private drawGrid(grid: Grid): void {
-    for (const hat of grid.getAllHats()) {
+    for (const hat of grid.iterHats()) {
       const { x, y } = grid.toPixel(hat.pos)
       this.hatRenderer.drawHat(this.ctx, hat.type, x, y)
     }
@@ -305,5 +327,11 @@ export class Renderer {
     ctx.font = '18px monospace'
     ctx.fillText('Click to play again', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60)
     ctx.restore()
+  }
+
+  /** Release the pre-rendered background bitmap */
+  destroy(): void {
+    this.backgroundBitmap?.close()
+    this.backgroundBitmap = null
   }
 }

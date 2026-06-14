@@ -56,6 +56,13 @@ export class Grid {
     return result
   }
 
+  /** Iterate hats without allocating an intermediate array — use in hot paths */
+  *iterHats(): Generator<GridHat> {
+    for (const [k, type] of this.cells) {
+      yield { pos: this.parseKey(k), type }
+    }
+  }
+
   clear(): void {
     this.cells.clear()
   }
@@ -209,7 +216,7 @@ export class Grid {
   getLowestRow(): number {
     let max = -1
     for (const k of this.cells.keys()) {
-      const row = parseInt(k.split(',')[0], 10)
+      const { row } = this.parseKey(k)
       if (row > max) max = row
     }
     return max

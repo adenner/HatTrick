@@ -48,7 +48,7 @@ export class Projectile {
 
   /** Returns the GridPos of the first hat hit, or null */
   hasHitHat(grid: Grid): GridPos | null {
-    for (const hat of grid.getAllHats()) {
+    for (const hat of grid.iterHats()) {
       const { x: hx, y: hy } = grid.toPixel(hat.pos)
       if (Math.hypot(this.x - hx, this.y - hy) < HAT_DIAMETER) {
         return hat.pos

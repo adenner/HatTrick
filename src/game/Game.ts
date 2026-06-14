@@ -1,15 +1,15 @@
 import {
   GamePhase,
   FallingHat,
-  CANVAS_WIDTH,
   CANVAS_HEIGHT,
   HAT_RADIUS,
   DANGER_ROW_Y,
   INITIAL_ROWS,
+  MIN_MATCH_COUNT,
 } from '../types'
 import { Grid } from './Grid'
 import { Shooter } from './Shooter'
-import { Projectile, computeAimLine } from './Projectile'
+import { Projectile } from './Projectile'
 import { calculateShotScore } from './scoring'
 import { HatRenderer } from '../render/HatRenderer'
 import { Renderer, RenderState } from '../render/Renderer'
@@ -27,7 +27,6 @@ export class Game {
   private highScore = 0
   private combo = 1
   private fallingHats: FallingHat[] = []
-  private aimLine: Array<{ x: number; y: number }> = []
 
   private readonly renderer: Renderer
   private readonly hatRenderer: HatRenderer
@@ -46,11 +45,14 @@ export class Game {
       (x, y) => this.handleAim(x, y),
       (key) => this.handleKey(key),
     )
-    this.highScore = parseInt(localStorage.getItem(HIGH_SCORE_KEY) ?? '0', 10)
+    this.highScore = parseInt(localStorage.getItem(HIGH_SCORE_KEY) ?? '0', 10) || 0
   }
 
   async init(): Promise<void> {
-    await this.hatRenderer.prerender()
+    await Promise.all([
+      this.hatRenderer.prerender(),
+      this.renderer.init(),
+    ])
   }
 
   start(): void {
@@ -122,7 +124,7 @@ export class Game {
     // Find matches
     const matched = this.grid.findMatches(landPos, type)
 
-    if (matched.size >= 3) {
+    if (matched.size >= MIN_MATCH_COUNT) {
       const matchedHats = this.grid.removeByKeys(matched)
       const disconnectedKeys = this.grid.findDisconnected()
       const fallenHats = this.grid.removeByKeys(disconnectedKeys)
@@ -184,18 +186,11 @@ export class Game {
 
     this.shooter.aimAt(x, y)
     this.projectile = this.shooter.fire()
-    this.aimLine = []
   }
 
   private handleAim(x: number, y: number): void {
     if (this.phase !== 'playing' || this.projectile?.active) return
     this.shooter.aimAt(x, y)
-    this.aimLine = computeAimLine(
-      this.shooter.x,
-      this.shooter.y,
-      this.shooter.angleDeg,
-      CANVAS_WIDTH,
-    )
   }
 
   private handleKey(key: string): void {
@@ -217,7 +212,6 @@ export class Game {
     this.score = 0
     this.combo = 1
     this.fallingHats = []
-    this.aimLine = []
     this.phase = 'playing'
     this.lastTimestamp = performance.now()
   }
@@ -228,7 +222,6 @@ export class Game {
       grid: this.grid,
       shooter: this.shooter,
       projectile: this.projectile,
-      aimLine: this.aimLine,
       fallingHats: this.fallingHats,
       score: this.score,
       highScore: this.highScore,
@@ -239,5 +232,7 @@ export class Game {
   destroy(): void {
     cancelAnimationFrame(this.animationId)
     this.input.destroy()
+    this.hatRenderer.destroy()
+    this.renderer.destroy()
   }
 }

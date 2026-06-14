@@ -86,8 +86,7 @@ export class HatRenderer {
     cx: number,
     cy: number,
   ): void {
-    const colors = ['#333','#8B5E1A','#C8A030','#5500aa','#CC2222','#006B7D','#228B22']
-    ctx.fillStyle = colors[type] ?? '#888'
+    ctx.fillStyle = HAT_SPRITES[type]?.glowColor ?? '#888'
     ctx.beginPath()
     ctx.arc(cx, cy, this.radius, 0, Math.PI * 2)
     ctx.fill()
@@ -95,5 +94,11 @@ export class HatRenderer {
 
   isReady(): boolean {
     return this.cache.size === HAT_TYPE_COUNT
+  }
+
+  /** Release GPU-side ImageBitmap textures */
+  destroy(): void {
+    for (const bmp of this.cache.values()) bmp.close()
+    this.cache.clear()
   }
 }

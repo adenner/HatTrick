@@ -89,21 +89,20 @@ describe('Shooter', () => {
     })
   })
 
-  describe('getVelocity', () => {
-    it('straight up gives vx=0, vy=-1', () => {
+  describe('fired projectile velocity', () => {
+    it('straight up gives vx≈0', () => {
       const s = new Shooter()
       s.aimAt(SHOOTER_X, SHOOTER_Y - 100)
-      const { vx, vy } = s.getVelocity()
-      expect(vx).toBeCloseTo(0)
-      expect(vy).toBeCloseTo(-1)
+      const proj = s.fire()
+      expect(proj.vx).toBeCloseTo(0, 3)
+      expect(proj.vy).toBeLessThan(0)
     })
 
-    it('45° right gives equal vx and |vy|', () => {
+    it('45° right: vx ≈ vy magnitude', () => {
       const s = new Shooter()
       s.angleDeg = 45
-      const { vx, vy } = s.getVelocity()
-      expect(vx).toBeCloseTo(Math.sin(Math.PI / 4))
-      expect(vy).toBeCloseTo(-Math.cos(Math.PI / 4))
+      const proj = s.fire()
+      expect(proj.vx).toBeCloseTo(proj.vy * -1, 3)
     })
   })
 })

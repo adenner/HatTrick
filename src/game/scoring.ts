@@ -1,3 +1,5 @@
+import { MIN_MATCH_COUNT } from '../types'
+
 export const MAX_COMBO = 8
 
 export function scoreMatches(count: number, combo: number): number {
@@ -21,7 +23,7 @@ export function calculateShotScore(
   fallenCount: number,
   combo: number,
 ): { points: number; newCombo: number } {
-  if (matchedCount < 3) {
+  if (matchedCount < MIN_MATCH_COUNT) {
     return { points: 0, newCombo: resetCombo() }
   }
   const points = scoreMatches(matchedCount, combo) + scoreFalls(fallenCount, combo)

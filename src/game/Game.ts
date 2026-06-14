@@ -14,6 +14,7 @@ import { calculateShotScore } from './scoring'
 import { HatRenderer } from '../render/HatRenderer'
 import { Renderer, RenderState } from '../render/Renderer'
 import { InputHandler } from '../input/InputHandler'
+import { SoundEngine } from '../audio/SoundEngine'
 
 const HIGH_SCORE_KEY = 'hatTrickHighScore'
 const MAX_DELTA_MS = 50
@@ -31,6 +32,7 @@ export class Game {
   private readonly renderer: Renderer
   private readonly hatRenderer: HatRenderer
   private readonly input: InputHandler
+  private readonly sound: SoundEngine
   private animationId = 0
   private lastTimestamp = 0
 
@@ -39,6 +41,7 @@ export class Game {
     this.shooter = new Shooter()
     this.hatRenderer = new HatRenderer(HAT_RADIUS)
     this.renderer = new Renderer(canvas, this.hatRenderer)
+    this.sound = new SoundEngine()
     this.input = new InputHandler(
       canvas,
       (x, y) => this.handleShoot(x, y),
@@ -84,7 +87,8 @@ export class Game {
 
     if (!this.projectile?.active) return
 
-    this.projectile.update()
+    const bounced = this.projectile.update()
+    if (bounced) this.sound.play('bounce')
 
     // Check hat collision first (takes priority over ceiling)
     const hitPos = this.projectile.hasHitHat(this.grid)
@@ -93,7 +97,6 @@ export class Game {
       if (landPos) {
         this.snapAndResolve(landPos)
       } else {
-        // No free adjacent cell — treat as ceiling hit in top area or lose
         this.projectile.active = false
         this.projectile = null
         this.checkLoss()
@@ -121,7 +124,6 @@ export class Game {
 
     this.grid.setHat(landPos, type)
 
-    // Find matches
     const matched = this.grid.findMatches(landPos, type)
 
     if (matched.size >= MIN_MATCH_COUNT) {
@@ -137,7 +139,12 @@ export class Game {
       this.score += points
       this.combo = newCombo
 
-      // Spawn fall animations
+      this.sound.play('match', this.combo)
+      if (fallenHats.length > 0) {
+        // Slight delay so fall sound doesn't clash with match sound
+        setTimeout(() => this.sound.play('fall'), 120)
+      }
+
       for (const hat of [...matchedHats, ...fallenHats]) {
         const { x, y } = this.grid.toPixel(hat.pos)
         this.fallingHats.push({
@@ -157,10 +164,12 @@ export class Game {
 
       if (this.grid.size === 0) {
         this.phase = 'won'
+        this.sound.play('win')
         return
       }
     } else {
       this.combo = 1
+      this.sound.play('land')
     }
 
     this.checkLoss()
@@ -169,10 +178,14 @@ export class Game {
   private checkLoss(): void {
     if (this.grid.getLowestOccupiedY() > DANGER_ROW_Y) {
       this.phase = 'lost'
+      this.sound.play('lose')
     }
   }
 
   private handleShoot(x: number, y: number): void {
+    // Unlock AudioContext on first user gesture
+    this.sound.resume()
+
     if (this.phase === 'menu') {
       this.startNewGame()
       return
@@ -186,6 +199,7 @@ export class Game {
 
     this.shooter.aimAt(x, y)
     this.projectile = this.shooter.fire()
+    this.sound.play('shoot')
   }
 
   private handleAim(x: number, y: number): void {
@@ -201,6 +215,9 @@ export class Game {
         this.phase = 'playing'
         this.lastTimestamp = performance.now()
       }
+    }
+    if (key === 'm') {
+      this.sound.toggleMute()
     }
   }
 
@@ -226,6 +243,7 @@ export class Game {
       score: this.score,
       highScore: this.highScore,
       combo: this.combo,
+      muted: this.sound.muted,
     }
   }
 
@@ -234,5 +252,6 @@ export class Game {
     this.input.destroy()
     this.hatRenderer.destroy()
     this.renderer.destroy()
+    this.sound.destroy()
   }
 }

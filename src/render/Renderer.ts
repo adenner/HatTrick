@@ -19,6 +19,7 @@ export interface RenderState {
   score: number
   highScore: number
   combo: number
+  muted: boolean
 }
 
 export class Renderer {
@@ -84,7 +85,7 @@ export class Renderer {
       if (state.projectile?.active) {
         this.drawProjectile(state.projectile)
       }
-      this.drawHUD(state.score, state.highScore, state.combo)
+      this.drawHUD(state.score, state.highScore, state.combo, state.muted)
     }
 
     if (state.phase === 'paused') {
@@ -216,7 +217,7 @@ export class Renderer {
     this.hatRenderer.drawHat(this.ctx, proj.type, proj.x, proj.y)
   }
 
-  private drawHUD(score: number, highScore: number, combo: number): void {
+  private drawHUD(score: number, highScore: number, combo: number, muted: boolean): void {
     const { ctx } = this
     ctx.save()
 
@@ -242,6 +243,12 @@ export class Renderer {
       ctx.textAlign = 'left'
       ctx.fillText(`×${combo} COMBO`, 12, 38)
     }
+
+    // Mute indicator
+    ctx.font = '14px monospace'
+    ctx.textAlign = 'left'
+    ctx.fillStyle = muted ? 'rgba(255,80,80,0.8)' : 'rgba(255,255,255,0.3)'
+    ctx.fillText(muted ? '🔇 M' : '🔊 M', 12, CANVAS_HEIGHT - 16)
 
     ctx.restore()
   }
@@ -282,7 +289,7 @@ export class Renderer {
     ctx.fillStyle = 'rgba(255,255,255,0.35)'
     ctx.font = '13px monospace'
     ctx.fillText('Move mouse to aim · Click to shoot', CANVAS_WIDTH / 2, 480)
-    ctx.fillText('Press P to pause', CANVAS_WIDTH / 2, 500)
+    ctx.fillText('P to pause · M to mute', CANVAS_WIDTH / 2, 500)
 
     ctx.restore()
   }

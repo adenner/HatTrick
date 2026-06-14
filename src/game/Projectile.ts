@@ -25,21 +25,28 @@ export class Projectile {
     this.vy = -PROJECTILE_SPEED * Math.cos(rad)
   }
 
-  update(): void {
+  /** Returns true if the projectile bounced off a wall this frame */
+  update(): boolean {
     this.x += this.vx
     this.y += this.vy
+
+    let bounced = false
 
     // Left wall bounce
     if (this.x - HAT_RADIUS < 0) {
       this.x = HAT_RADIUS
       this.vx = Math.abs(this.vx)
+      bounced = true
     }
 
     // Right wall bounce
     if (this.x + HAT_RADIUS > CANVAS_WIDTH) {
       this.x = CANVAS_WIDTH - HAT_RADIUS
       this.vx = -Math.abs(this.vx)
+      bounced = true
     }
+
+    return bounced
   }
 
   hasHitCeiling(): boolean {

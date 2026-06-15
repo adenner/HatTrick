@@ -1,23 +1,86 @@
 import { HatType } from '../types'
 
+/**
+ * A single filled (and optionally stroked) path layer within a hat sprite.
+ *
+ * Hat sprites are built by compositing multiple `SvgLayer` paths in order,
+ * back to front, on top of each other.  All path coordinates are defined in
+ * a 48×48 viewBox centred at `(0, 0)` (so the hat occupies roughly the
+ * region `[-24, 24] × [-26, 16]`).  {@link HatRenderer} scales this design
+ * space uniformly from radius 24 to the runtime `HAT_RADIUS` before
+ * blitting each layer onto an `OffscreenCanvas`.
+ */
 export interface SvgLayer {
+  /**
+   * SVG path data string (`d` attribute).  Coordinates are relative to the
+   * 48×48 viewBox centred at the origin — positive Y is downward (canvas
+   * convention).
+   */
   d: string
+
+  /**
+   * CSS fill colour applied to the closed path interior.  Any valid CSS
+   * colour string is accepted (hex, `rgb()`, `rgba()`, named colour, etc.).
+   * Use `'none'` for an unfilled (outline-only) path.
+   */
   fill: string
+
+  /**
+   * Optional CSS stroke colour drawn along the path outline.  When omitted
+   * no stroke is applied to this layer.
+   */
   stroke?: string
+
+  /**
+   * Width of the stroke in viewBox units.  Only meaningful when {@link stroke}
+   * is also set; ignored otherwise.
+   */
   strokeWidth?: number
 }
 
+/**
+ * Complete visual definition for a single hat type.
+ *
+ * A sprite is a stack of {@link SvgLayer} path layers drawn in array order
+ * (index 0 is the bottommost / background layer).  At startup,
+ * {@link HatRenderer} rasterises each `HatSprite` onto a dedicated
+ * `OffscreenCanvas` and caches the result as an `ImageBitmap`.
+ */
 export interface HatSprite {
+  /**
+   * Ordered list of SVG path layers composited back-to-front to produce the
+   * final hat image.  At least one layer is required.
+   */
   layers: SvgLayer[]
-  /** Hex color for match glow effect */
+
+  /**
+   * Hex colour string used for the canvas shadow glow that is applied when a
+   * hat is highlighted by the targeting-assist overlay.  Should roughly match
+   * the dominant colour of the hat sprite so the glow looks natural.
+   */
   glowColor: string
+
+  /**
+   * Human-readable display name for this hat type (e.g. `'Top Hat'`).
+   * Used in debug tooling and any future UI that names hat varieties.
+   */
   label: string
 }
 
-// All paths are designed for a 48×48 viewBox centered at (0,0).
-// Positive Y is down (canvas convention).
-// HatRenderer scales from design radius 24 to actual HAT_RADIUS.
-
+/**
+ * Sprite definitions for all seven hat types in the game.
+ *
+ * Keyed by {@link HatType} enum value so that any subsystem can retrieve a
+ * sprite with a simple indexed lookup:
+ * ```ts
+ * const sprite = HAT_SPRITES[HatType.FEDORA]
+ * ```
+ *
+ * All paths are designed for a 48×48 viewBox centred at `(0, 0)`.
+ * Positive Y is down (canvas convention).  {@link HatRenderer} scales each
+ * sprite from design radius 24 to the runtime `HAT_RADIUS` before caching
+ * the result as an `ImageBitmap` for efficient per-frame `drawImage` calls.
+ */
 export const HAT_SPRITES: Record<HatType, HatSprite> = {
   [HatType.TOP_HAT]: {
     label: 'Top Hat',

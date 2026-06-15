@@ -21,6 +21,27 @@ import { SoundEngine } from '../audio/SoundEngine'
 const HIGH_SCORE_KEY = 'hatTrickHighScore'
 const MAX_DELTA_MS = 50
 
+/**
+ * Top-level orchestrator for Hat Trick.
+ *
+ * `Game` owns every subsystem — grid, shooter, projectile, renderer, input,
+ * and audio — and is the single source of truth for all mutable game state.
+ * It drives the `requestAnimationFrame` loop, routes input events to the
+ * correct handlers, and assembles a {@link RenderState} snapshot each frame
+ * for the {@link Renderer} to consume.
+ *
+ * Typical lifecycle:
+ * ```ts
+ * const game = new Game(canvas)
+ * await game.init()   // pre-render assets
+ * game.start()        // begin the RAF loop (shows menu)
+ * // ... player interacts ...
+ * game.destroy()      // cancel RAF, detach listeners, free GPU memory
+ * ```
+ *
+ * The state machine progresses through {@link GamePhase} values:
+ * `menu` → `playing` → (`paused` ↔ `playing`) → `won` | `lost` → `playing` …
+ */
 export class Game {
   private phase: GamePhase = 'menu'
   private grid: Grid
@@ -57,6 +78,13 @@ export class Game {
     this.highScore = parseInt(localStorage.getItem(HIGH_SCORE_KEY) ?? '0', 10) || 0
   }
 
+  /**
+   * Asynchronously pre-renders all game assets before the first frame is drawn.
+   *
+   * Runs {@link HatRenderer.prerender} and {@link Renderer.init} in parallel so
+   * that both hat sprite bitmaps and the static background bitmap are ready
+   * before gameplay begins.  Must be `await`-ed before calling {@link start}.
+   */
   async init(): Promise<void> {
     await Promise.all([
       this.hatRenderer.prerender(),
@@ -64,11 +92,30 @@ export class Game {
     ])
   }
 
+  /**
+   * Enters the menu phase and kicks off the `requestAnimationFrame` render loop.
+   *
+   * After this call returns, the game loop runs autonomously until
+   * {@link destroy} is called.  Call {@link init} first to ensure assets are
+   * ready.
+   */
   start(): void {
     this.phase = 'menu'
     this.loop(0)
   }
 
+  /**
+   * Core animation loop — called by `requestAnimationFrame` on every display
+   * refresh.
+   *
+   * Computes the elapsed time since the previous frame (capped at
+   * `MAX_DELTA_MS` to prevent large jumps after tab focus is restored),
+   * advances the simulation when playing, renders the current frame, and
+   * schedules the next iteration.
+   *
+   * @param timestamp - High-resolution timestamp supplied by the browser's RAF
+   *   callback, in milliseconds.
+   */
   private loop(timestamp: number): void {
     const delta = Math.min(timestamp - this.lastTimestamp, MAX_DELTA_MS)
     this.lastTimestamp = timestamp
@@ -81,6 +128,22 @@ export class Game {
     this.animationId = requestAnimationFrame(t => this.loop(t))
   }
 
+  /**
+   * Advances all in-flight simulation state by one frame.
+   *
+   * Responsibilities (in order):
+   * 1. Steps falling-hat particles (gravity, fade) and culls any that have
+   *    either fully faded out or scrolled below the canvas.
+   * 2. Updates the active projectile's position via {@link Projectile.update};
+   *    plays a bounce sound if a wall reflection occurred.
+   * 3. Checks for hat-collision first (the projectile hit an existing grid hat)
+   *    then ceiling collision, and calls {@link snapAndResolve} for either.
+   *
+   * Does nothing when there is no active projectile.
+   *
+   * @param _delta - Elapsed time in ms since the last frame (currently unused
+   *   because all motion uses per-frame constants rather than delta-time).
+   */
   private update(_delta: number): void {
     // Update falling hats
     this.fallingHats = this.fallingHats.filter(h => {
@@ -122,6 +185,28 @@ export class Game {
     }
   }
 
+  /**
+   * Places the in-flight projectile into the grid at `landPos` and resolves
+   * all downstream consequences of that placement.
+   *
+   * Resolution order:
+   * 1. The projectile's hat type is written into `landPos` via
+   *    {@link Grid.setHat}.
+   * 2. A BFS match search ({@link Grid.findMatches}) finds all same-type
+   *    neighbours connected to `landPos`.
+   * 3. **If a match of `>= MIN_MATCH_COUNT` is found:**
+   *    - The matched hats are removed and converted to falling particles.
+   *    - A disconnection sweep ({@link Grid.findDisconnected}) is run; any
+   *      newly floating hats are also removed and sent falling.
+   *    - Score and combo are updated via {@link calculateShotScore}.
+   *    - Match and fall sounds are triggered.
+   *    - If the grid is now empty, the player wins.
+   * 4. **On a miss** (group too small): combo resets to 1 and a land sound plays.
+   * 5. {@link checkLoss} is called to detect danger-line overflow.
+   * 6. The targeting overlay is refreshed for the next shot.
+   *
+   * @param landPos - Grid cell (`row`, `col`) where the projectile will snap.
+   */
   private snapAndResolve(landPos: { row: number; col: number }): void {
     if (!this.projectile) return
     const type = this.projectile.type
@@ -183,6 +268,13 @@ export class Game {
     this.recomputeTarget()
   }
 
+  /**
+   * Checks whether the lowest occupied row of the grid has crossed the danger
+   * line, and if so transitions to the `'lost'` phase.
+   *
+   * Called after every snap-and-resolve so that a newly placed hat that pushes
+   * the cluster past `DANGER_ROW_Y` is detected immediately.
+   */
   private checkLoss(): void {
     if (this.grid.getLowestOccupiedY() > DANGER_ROW_Y) {
       this.phase = 'lost'
@@ -190,6 +282,18 @@ export class Game {
     }
   }
 
+  /**
+   * Handles a click (or tap) from the player.
+   *
+   * Unlocks the `AudioContext` on the first gesture (browser policy), then
+   * branches based on the current phase:
+   * - `menu`, `won`, `lost` → start a new game.
+   * - `playing` (no active projectile) → aim at `(x, y)` and fire.
+   * - Any other phase (e.g. `paused`) → ignore.
+   *
+   * @param x - Canvas-relative X coordinate of the click/tap.
+   * @param y - Canvas-relative Y coordinate of the click/tap.
+   */
   private handleShoot(x: number, y: number): void {
     // Unlock AudioContext on first user gesture
     this.sound.resume()
@@ -213,12 +317,66 @@ export class Game {
     this.targetGroup = new Set()
   }
 
+  /**
+   * Handles mouse/touch movement by updating the shooter's aim angle and
+   * refreshing the targeting overlay.
+   *
+   * Ignored when the game is not in the `'playing'` phase or while a
+   * projectile is already in flight.
+   *
+   * @param x - Canvas-relative X coordinate of the pointer.
+   * @param y - Canvas-relative Y coordinate of the pointer.
+   */
   private handleAim(x: number, y: number): void {
     if (this.phase !== 'playing' || this.projectile?.active) return
     this.shooter.aimAt(x, y)
     this.recomputeTarget()
   }
 
+  /**
+   * Handles a keyboard key press.
+   *
+   * - `p` / `Escape` — toggle between `'playing'` and `'paused'` phases;
+   *   resets `lastTimestamp` on resume to avoid a large delta spike.
+   * - `m` — toggle audio mute via {@link SoundEngine.toggleMute}.
+   * - `c` — toggle the targeting-assist cheat overlay; immediately
+   *   recomputes the predicted target for the current aim direction.
+   *
+   * @param key - Lowercase key string from the keyboard event (e.g. `'p'`,
+   *   `'m'`, `'c'`, `'escape'`).
+   */
+  private handleKey(key: string): void {
+    if (key === 'p' || key === 'escape') {
+      if (this.phase === 'playing') {
+        this.phase = 'paused'
+      } else if (this.phase === 'paused') {
+        this.phase = 'playing'
+        this.lastTimestamp = performance.now()
+      }
+    }
+    if (key === 'm') {
+      this.sound.toggleMute()
+    }
+    if (key === 'c') {
+      this.targetingEnabled = !this.targetingEnabled
+      this.recomputeTarget()
+    }
+  }
+
+  /**
+   * Recomputes the targeting-assist overlay for the current shooter angle.
+   *
+   * Steps:
+   * 1. If targeting is disabled or a projectile is active, clears
+   *    `targetCell` and `targetGroup` and returns early.
+   * 2. Runs {@link simulateLanding} to find where the shot would land.
+   * 3. Temporarily places the current hat type at that cell and runs a full
+   *    BFS match search ({@link Grid.findMatchesAll}) to determine the
+   *    would-be group size, then removes the temporary hat.
+   *
+   * The result is stored in `targetCell` / `targetGroup` and passed through
+   * {@link buildRenderState} to {@link Renderer.drawTargeting} each frame.
+   */
   private recomputeTarget(): void {
     if (!this.targetingEnabled || this.projectile?.active) {
       this.targetCell = null
@@ -241,24 +399,13 @@ export class Game {
     }
   }
 
-  private handleKey(key: string): void {
-    if (key === 'p' || key === 'escape') {
-      if (this.phase === 'playing') {
-        this.phase = 'paused'
-      } else if (this.phase === 'paused') {
-        this.phase = 'playing'
-        this.lastTimestamp = performance.now()
-      }
-    }
-    if (key === 'm') {
-      this.sound.toggleMute()
-    }
-    if (key === 'c') {
-      this.targetingEnabled = !this.targetingEnabled
-      this.recomputeTarget()
-    }
-  }
-
+  /**
+   * Resets all game state and begins a new round in the `'playing'` phase.
+   *
+   * Creates fresh {@link Grid} and {@link Shooter} instances, seeds the grid
+   * with `INITIAL_ROWS` of random hats, zeroes the score and combo, and
+   * clears any in-flight particles and targeting state.
+   */
   private startNewGame(): void {
     this.grid = new Grid()
     this.grid.fillInitialGrid(INITIAL_ROWS)
@@ -273,6 +420,18 @@ export class Game {
     this.lastTimestamp = performance.now()
   }
 
+  /**
+   * Assembles a {@link RenderState} snapshot from the current game state.
+   *
+   * This snapshot is the sole communication channel between the game logic
+   * layer and the renderer.  It is constructed every frame and passed
+   * directly to {@link Renderer.render}; the renderer reads it without
+   * mutating it.
+   *
+   * @returns A plain-object snapshot of all state needed to draw the current
+   *   frame, including phase, grid, shooter, projectile, particles, score,
+   *   and targeting data.
+   */
   private buildRenderState(): RenderState {
     return {
       phase: this.phase,
@@ -290,6 +449,13 @@ export class Game {
     }
   }
 
+  /**
+   * Tears down the game and releases all resources.
+   *
+   * Cancels the active `requestAnimationFrame` callback, detaches all input
+   * listeners, frees pre-rendered hat bitmaps and the background bitmap, and
+   * closes the audio context.  Safe to call at any point in the lifecycle.
+   */
   destroy(): void {
     cancelAnimationFrame(this.animationId)
     this.input.destroy()

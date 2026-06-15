@@ -29,6 +29,8 @@ The combo multiplier increments each consecutive successful pop (max ×8) and re
 | Touch move | Aim (mobile) |
 | Touch tap | Fire (mobile) |
 | P / Escape | Pause / Resume |
+| M | Toggle mute |
+| C | Toggle targeting-assist cheat |
 
 ## Hat Types
 
@@ -116,3 +118,40 @@ Match detection and disconnection detection both use BFS flood-fill. Disconnecte
 ### Hat Rendering
 
 Each hat is defined as layered SVG path strings (`d` attributes) centered at the origin in a 48×48 viewBox. At startup `HatRenderer` pre-renders each type onto an `OffscreenCanvas` (scaled to the actual `HAT_RADIUS`) and caches the result as an `ImageBitmap` for fast `drawImage` calls during gameplay.
+
+### Data Flow
+
+```
+User input (mouse / touch / keyboard)
+        │
+        ▼
+   InputHandler  ──────────────────────────────────────┐
+        │                                               │
+        │  onAim(x, y)      onShoot(x, y)    onKey(k)  │
+        ▼                                               │
+      Game  ◄──────────────────────────────────────────┘
+   (RAF loop)
+        │
+        ├─► Shooter.aimAt / fire()  ──► Projectile (physics)
+        │
+        ├─► Grid (BFS match / disconnect / snap)
+        │
+        ├─► scoring.calculateShotScore()
+        │
+        ├─► SoundEngine.play()
+        │
+        └─► Renderer.render(RenderState)
+                │
+                ├─► HatRenderer.drawHat()  (ImageBitmap cache)
+                └─► Canvas 2D context
+```
+
+### Targeting Cheat (press C)
+
+When enabled, `Game.recomputeTarget()` runs `simulateLanding()` every aim
+frame — the same physics simulation used by the live projectile, stepped up to
+600 iterations. The predicted landing cell is temporarily inserted into the
+grid, `Grid.findMatchesAll()` identifies the would-be match group, and the
+cell is immediately removed again. The result feeds into `Renderer.drawTargeting()`
+which renders green rings (group ≥ 3, will pop), yellow rings (group < 3, no
+pop), and a ghost hat at the landing cell.

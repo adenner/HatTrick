@@ -1,14 +1,76 @@
+/**
+ * The set of named sound effects the engine can play.
+ *
+ * - `'shoot'`  – fired when the player launches a hat.
+ * - `'bounce'` – fired when the projectile ricochets off a side wall.
+ * - `'land'`   – fired when a hat lands on the grid without triggering a match.
+ * - `'match'`  – fired when three or more same-type hats are cleared.
+ * - `'fall'`   – fired when disconnected hats cascade off the grid.
+ * - `'win'`    – fired when the player clears the board.
+ * - `'lose'`   – fired when hats reach the danger line and the game ends.
+ */
 export type SoundName = 'shoot' | 'bounce' | 'land' | 'match' | 'fall' | 'win' | 'lose'
 
+/**
+ * Procedural audio engine for HatTrick built entirely on the Web Audio API.
+ *
+ * No audio files are loaded or decoded at runtime. Every sound effect is
+ * synthesised on-the-fly using oscillators, gain envelopes, and (for the
+ * match "pop") a short noise burst. This keeps the asset bundle lean and
+ * avoids network requests entirely.
+ *
+ * ## Usage
+ * ```ts
+ * const audio = new SoundEngine()
+ *
+ * // Unlock the AudioContext from a user-gesture handler:
+ * button.addEventListener('click', () => audio.resume())
+ *
+ * // Play a sound (safe to call before resume — will be a no-op if still locked):
+ * audio.play('shoot')
+ *
+ * // Combo multiplier raises pitch on match sounds:
+ * audio.play('match', 3)
+ *
+ * // Toggle mute without destroying state:
+ * audio.toggleMute()
+ *
+ * // Clean up when done:
+ * audio.destroy()
+ * ```
+ *
+ * ## Architecture
+ * A single shared `AudioContext` is created lazily on the first call to
+ * {@link resume} or {@link play}. All oscillator/source nodes route through a
+ * master `GainNode` so that {@link toggleMute} can silence everything
+ * instantaneously without stopping individual nodes. The `AudioContext` is
+ * never recreated; calling {@link destroy} closes it permanently.
+ */
 export class SoundEngine {
   private ctx: AudioContext | null = null
   private master: GainNode | null = null
   private _muted = false
 
+  /**
+   * Whether the engine is currently muted.
+   *
+   * When `true`, calls to {@link play} are no-ops and the master gain is set
+   * to `0`. The muted state persists across {@link resume} calls.
+   */
   get muted(): boolean {
     return this._muted
   }
 
+  /**
+   * Toggles the mute state and adjusts the master gain node accordingly.
+   *
+   * Flips `_muted`, then sets the master gain to `0` (muted) or `1`
+   * (unmuted). If the `AudioContext` has not yet been created the muted flag
+   * is still updated; the gain will be applied when the context is eventually
+   * initialised.
+   *
+   * @returns The new mute state — `true` if now muted, `false` if now unmuted.
+   */
   toggleMute(): boolean {
     this._muted = !this._muted
     if (this.master) {
@@ -17,11 +79,31 @@ export class SoundEngine {
     return this._muted
   }
 
-  /** Must be called from a user-gesture handler to unlock AudioContext */
+  /**
+   * Unlocks the underlying `AudioContext` in response to a user gesture.
+   *
+   * Browsers require a user interaction (click, keydown, etc.) before audio
+   * can play. Call this method inside any such event handler early in the
+   * game lifecycle to ensure the context is in the `'running'` state before
+   * the first sound is needed. Subsequent calls are safe but have no effect
+   * once the context is already running.
+   */
   resume(): void {
     this.getCtx()
   }
 
+  /**
+   * Plays the named sound effect, optionally scaled by a combo multiplier.
+   *
+   * The call is a no-op when {@link muted} is `true`. Each sound is
+   * synthesised immediately using Web Audio API nodes that are scheduled to
+   * auto-stop; no cleanup is required by the caller.
+   *
+   * @param name  - The identifier of the sound effect to play.
+   * @param combo - Combo level passed to the `'match'` sound to raise its
+   *   pitch with each successive multi-match. Values above 8 are clamped
+   *   internally. Ignored for all other sound names. Defaults to `1`.
+   */
   play(name: SoundName, combo = 1): void {
     const ctx = this.getCtx()
     if (this._muted) return
@@ -37,6 +119,13 @@ export class SoundEngine {
     }
   }
 
+  /**
+   * Returns the shared `AudioContext`, creating and connecting the master
+   * gain node on first call. If the context is suspended (e.g., before a
+   * user gesture has been received) it is resumed automatically.
+   *
+   * @returns The active `AudioContext` instance.
+   */
   private getCtx(): AudioContext {
     if (!this.ctx) {
       this.ctx = new AudioContext()
@@ -50,6 +139,16 @@ export class SoundEngine {
     return this.ctx
   }
 
+  /**
+   * Creates a new `GainNode` connected to the master output and returns it.
+   *
+   * Every synthesised sound creates its own gain node through this helper so
+   * that individual volume envelopes can be applied without affecting the
+   * master level.
+   *
+   * @param ctx - The active `AudioContext`.
+   * @returns A `GainNode` wired to `this.master`.
+   */
   private out(ctx: AudioContext): GainNode {
     const g = ctx.createGain()
     g.connect(this.master!)
@@ -243,6 +342,13 @@ export class SoundEngine {
     src.stop(t + duration)
   }
 
+  /**
+   * Closes the `AudioContext` and releases all associated resources.
+   *
+   * After calling `destroy()`, further calls to {@link play} or {@link resume}
+   * will throw because the context is permanently closed. Create a new
+   * `SoundEngine` instance if audio is needed again.
+   */
   destroy(): void {
     void this.ctx?.close()
     this.ctx = null

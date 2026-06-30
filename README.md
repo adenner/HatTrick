@@ -186,3 +186,45 @@ npm run build
 ```
 
 Output is in `dist/`.
+
+## Container (Podman)
+
+Two `Containerfile`s are provided. Podman is drop-in compatible with Docker — swap `podman` for `docker` if preferred.
+
+### Dev server (Vite + HMR)
+
+Build once, then run with source directories mounted so Vite picks up edits
+without a container rebuild:
+
+```bash
+podman build -f Containerfile.dev -t hat-trick-dev .
+
+podman run --rm -p 5173:5173 \
+  -v ./src:/app/src:z \
+  -v ./index.html:/app/index.html:z \
+  hat-trick-dev
+```
+
+Open [http://localhost:5173](http://localhost:5173).  Edit files in `src/` and
+the browser reloads automatically via Vite HMR.
+
+> The `:z` flag relabels the volume for SELinux (required on Fedora / RHEL).
+> Drop it on macOS or non-SELinux Linux hosts.
+
+To run without live-mount (snapshot of current source):
+
+```bash
+podman run --rm -p 5173:5173 hat-trick-dev
+```
+
+### Production build (nginx)
+
+Multi-stage build: TypeScript + Vite compile in a Node image, then the
+compiled `dist/` is served by a minimal `nginx:alpine` image.
+
+```bash
+podman build -t hat-trick .
+podman run --rm -p 8080:80 hat-trick
+```
+
+Open [http://localhost:8080](http://localhost:8080).

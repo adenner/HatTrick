@@ -1,0 +1,18 @@
+FROM node:20-alpine
+WORKDIR /app
+
+# Install dependencies as a separate layer so rebuilds are fast
+# when only source files change.
+COPY package*.json ./
+RUN npm ci
+
+# Copy source. When running with volume mounts (see README) the host
+# src/ and index.html shadow these layers, enabling live HMR without
+# rebuilding the image.
+COPY . .
+
+EXPOSE 5173
+
+# --host binds to 0.0.0.0 so the dev server is reachable outside the
+# container; Vite's default of 127.0.0.1 is unreachable from the host.
+CMD ["npx", "vite", "--host"]

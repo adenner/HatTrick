@@ -1,0 +1,7 @@
+:80 {
+    root * /srv
+    file_server
+    encode gzip
+    # SPA fallback: unknown paths serve index.html so browser-side routing works
+    try_files {path} /index.html
+}

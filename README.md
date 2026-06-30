@@ -217,10 +217,11 @@ To run without live-mount (snapshot of current source):
 podman run --rm -p 5173:5173 hat-trick-dev
 ```
 
-### Production build (nginx)
+### Production build (Caddy 2)
 
 Multi-stage build: TypeScript + Vite compile in a Node image, then the
-compiled `dist/` is served by a minimal `nginx:alpine` image.
+compiled `dist/` is served by a `caddy:alpine` image. `Caddyfile` enables
+gzip compression and an SPA fallback so direct URL loads work correctly.
 
 ```bash
 podman build -t hat-trick .

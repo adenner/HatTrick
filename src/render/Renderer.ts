@@ -4,6 +4,7 @@ import {
   GridPos,
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
+  HAT_RADIUS,
   DANGER_ROW_Y,
   MIN_MATCH_COUNT,
 } from '../types'
@@ -75,6 +76,12 @@ export interface RenderState {
    * overlay to highlight the would-be match group before the player fires.
    */
   targetGroup: Set<string>
+
+  /**
+   * Number of shots remaining before the entire hat cluster advances down by
+   * one row and a fresh row is added at the ceiling.
+   */
+  shotsUntilAdvance: number
 }
 
 /**
@@ -178,7 +185,7 @@ export class Renderer {
       if (state.projectile?.active) {
         this.drawProjectile(state.projectile)
       }
-      this.drawHUD(state.score, state.highScore, state.combo, state.muted, state.targeting)
+      this.drawHUD(state.score, state.highScore, state.combo, state.muted, state.targeting, state.shotsUntilAdvance)
     }
 
     if (state.phase === 'paused') {
@@ -406,7 +413,7 @@ export class Renderer {
       ctx.strokeStyle = ringColor
       ctx.lineWidth = 2.5
       ctx.beginPath()
-      ctx.arc(x, y, 26, 0, Math.PI * 2)
+      ctx.arc(x, y, HAT_RADIUS + 2, 0, Math.PI * 2)
       ctx.stroke()
 
       // Subtle fill tint
@@ -427,7 +434,7 @@ export class Renderer {
       ctx.lineWidth = 2.5
       ctx.setLineDash([4, 4])
       ctx.beginPath()
-      ctx.arc(x, y, 26, 0, Math.PI * 2)
+      ctx.arc(x, y, HAT_RADIUS + 2, 0, Math.PI * 2)
       ctx.stroke()
       ctx.setLineDash([])
       ctx.restore()
@@ -470,13 +477,14 @@ export class Renderer {
    * - **Targeting indicator** (bottom-left, below mute) — shows whether the
    *   targeting-assist cheat is on; green when active, dimmed otherwise.
    *
-   * @param score      - Player's current score.
-   * @param highScore  - All-time high score.
-   * @param combo      - Current combo multiplier.
-   * @param muted      - Whether audio is muted.
-   * @param targeting  - Whether targeting assist is enabled.
+   * @param score             - Player's current score.
+   * @param highScore         - All-time high score.
+   * @param combo             - Current combo multiplier.
+   * @param muted             - Whether audio is muted.
+   * @param targeting         - Whether targeting assist is enabled.
+   * @param shotsUntilAdvance - Shots remaining before the grid advances down.
    */
-  private drawHUD(score: number, highScore: number, combo: number, muted: boolean, targeting: boolean): void {
+  private drawHUD(score: number, highScore: number, combo: number, muted: boolean, targeting: boolean, shotsUntilAdvance: number): void {
     const { ctx } = this
     ctx.save()
 
@@ -511,6 +519,17 @@ export class Renderer {
 
     ctx.fillStyle = targeting ? 'rgba(80,255,120,0.9)' : 'rgba(255,255,255,0.28)'
     ctx.fillText(targeting ? '🎯 C' : '◎ C', 12, CANVAS_HEIGHT - 16)
+
+    // Advance countdown (top-left, below score area)
+    const advanceColor = shotsUntilAdvance <= 2
+      ? 'rgba(255,80,80,0.95)'
+      : shotsUntilAdvance <= 4
+        ? 'rgba(255,180,60,0.9)'
+        : 'rgba(180,220,255,0.55)'
+    ctx.fillStyle = advanceColor
+    ctx.font = '11px monospace'
+    ctx.textAlign = 'left'
+    ctx.fillText(`▼ ADVANCE IN: ${shotsUntilAdvance}`, 12, 20)
 
     ctx.restore()
   }

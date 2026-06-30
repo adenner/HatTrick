@@ -40,6 +40,18 @@ describe('Shooter', () => {
       expect(s.angleDeg).toBe(MAX_ANGLE_DEG)
     })
 
+    it('clamps to MAX_ANGLE_DEG when mouse is exactly at shooter Y (dy=0, dx>0)', () => {
+      const s = new Shooter()
+      s.aimAt(SHOOTER_X + 50, SHOOTER_Y)
+      expect(s.angleDeg).toBe(MAX_ANGLE_DEG)
+    })
+
+    it('clamps to -MAX_ANGLE_DEG when mouse is exactly at shooter Y (dy=0, dx<0)', () => {
+      const s = new Shooter()
+      s.aimAt(SHOOTER_X - 50, SHOOTER_Y)
+      expect(s.angleDeg).toBe(-MAX_ANGLE_DEG)
+    })
+
     it('does not exceed ±MAX_ANGLE_DEG', () => {
       const s = new Shooter()
       const mousePositions = [

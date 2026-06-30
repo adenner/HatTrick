@@ -152,7 +152,7 @@ export const HAT_SPRITES: Record<HatType, HatSprite> = {
       // Bill (visor) pointing right
       { d: 'M 0 6 Q 14 6 24 10 Q 26 12 24 13 Q 16 10 0 10 Z', fill: '#aa1111', stroke: '#880000', strokeWidth: 1 },
       // Seam lines
-      { d: 'M 0 -24 Q 0 6 0 6', fill: 'none', stroke: '#aa1111', strokeWidth: 1 },
+      { d: 'M 0 -24 Q -1 -9 0 6', fill: 'none', stroke: '#aa1111', strokeWidth: 1 },
       { d: 'M -10 -16 Q -5 -5 0 6', fill: 'none', stroke: '#aa1111', strokeWidth: 1 },
       { d: 'M 10 -16 Q 5 -5 0 6', fill: 'none', stroke: '#aa1111', strokeWidth: 1 },
       // Button on top

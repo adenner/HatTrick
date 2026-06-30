@@ -169,3 +169,10 @@ export const MIN_MATCH_COUNT = 3
  * Number of hat rows pre-populated on the grid when a new game begins.
  */
 export const INITIAL_ROWS = 8
+
+/**
+ * Number of shots the player gets before the entire hat cluster descends
+ * by one row and a fresh row is added at the ceiling. Lower values make
+ * the game harder.
+ */
+export const SHOTS_PER_ADVANCE = 8

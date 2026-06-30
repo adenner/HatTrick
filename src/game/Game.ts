@@ -8,6 +8,7 @@ import {
   DANGER_ROW_Y,
   INITIAL_ROWS,
   MIN_MATCH_COUNT,
+  SHOTS_PER_ADVANCE,
 } from '../types'
 import { Grid } from './Grid'
 import { Shooter } from './Shooter'
@@ -55,6 +56,7 @@ export class Game {
   private targetingEnabled = false
   private targetCell: GridPos | null = null
   private targetGroup: Set<string> = new Set()
+  private shotsUntilAdvance = SHOTS_PER_ADVANCE
 
   private readonly renderer: Renderer
   private readonly hatRenderer: HatRenderer
@@ -214,6 +216,15 @@ export class Game {
     this.projectile = null
 
     this.grid.setHat(landPos, type)
+
+    // Advance the grid periodically to ramp up difficulty
+    this.shotsUntilAdvance--
+    if (this.shotsUntilAdvance <= 0) {
+      this.shotsUntilAdvance = SHOTS_PER_ADVANCE
+      this.grid.advanceRows()
+      this.checkLoss()
+      if (this.phase !== 'playing') return
+    }
 
     const matched = this.grid.findMatches(landPos, type)
 
@@ -415,6 +426,7 @@ export class Game {
     this.fallingHats = []
     this.targetCell = null
     this.targetGroup = new Set()
+    this.shotsUntilAdvance = SHOTS_PER_ADVANCE
     this.phase = 'playing'
     this.lastTimestamp = performance.now()
   }
@@ -445,6 +457,7 @@ export class Game {
       targeting: this.targetingEnabled,
       targetCell: this.targetCell,
       targetGroup: this.targetGroup,
+      shotsUntilAdvance: this.shotsUntilAdvance,
     }
   }
 

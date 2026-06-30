@@ -99,5 +99,12 @@ describe('scoring', () => {
       const result = calculateShotScore(0, 3, 2)
       expect(result.points).toBe(0)
     })
+
+    it('combo + falls are both multiplied by the combo', () => {
+      // 3 matched * 100 * 2 + 4 fallen * 50 * 2 = 600 + 400 = 1000
+      const result = calculateShotScore(3, 4, 2)
+      expect(result.points).toBe(1000)
+      expect(result.newCombo).toBe(3)
+    })
   })
 })

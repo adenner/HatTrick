@@ -350,6 +350,45 @@ describe('Grid', () => {
     })
   })
 
+  // --- advanceRows ---
+
+  describe('advanceRows', () => {
+    it('shifts existing hats down by one row', () => {
+      grid.setHat({ row: 0, col: 0 }, HatType.TOP_HAT)
+      grid.setHat({ row: 0, col: 1 }, HatType.FEDORA)
+      grid.advanceRows()
+      expect(grid.getHat({ row: 1, col: 0 })).toBe(HatType.TOP_HAT)
+      expect(grid.getHat({ row: 1, col: 1 })).toBe(HatType.FEDORA)
+      expect(grid.getHat({ row: 0, col: 0 })).not.toBeNull() // new row seeded
+    })
+
+    it('seeds a full row 0 after advancing', () => {
+      grid.setHat({ row: 0, col: 0 }, HatType.WITCH)
+      grid.advanceRows()
+      // Row 0 (even) should have GRID_COLS hats
+      let row0Count = 0
+      for (let col = 0; col < GRID_COLS; col++) {
+        if (grid.getHat({ row: 0, col }) !== null) row0Count++
+      }
+      expect(row0Count).toBe(GRID_COLS)
+    })
+
+    it('does not leave any row-0 hats from the old layout', () => {
+      grid.setHat({ row: 0, col: 2 }, HatType.BERET)
+      grid.advanceRows()
+      // The hat that was at row 0 is now at row 1
+      expect(grid.getHat({ row: 1, col: 2 })).toBe(HatType.BERET)
+    })
+
+    it('increases total hat count by one row', () => {
+      grid.fillInitialGrid(3)
+      const before = grid.size
+      grid.advanceRows()
+      // One new row 0 added (GRID_COLS = 13 hats for even row)
+      expect(grid.size).toBe(before + GRID_COLS)
+    })
+  })
+
   // --- findMatchesAll ---
 
   describe('findMatchesAll', () => {

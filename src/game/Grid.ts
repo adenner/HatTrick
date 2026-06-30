@@ -414,6 +414,28 @@ export class Grid {
   }
 
   /**
+   * Shifts every existing hat down by one row and seeds a new random row at
+   * the ceiling (row 0). Called periodically during play to increase difficulty.
+   *
+   * All occupied cells are re-keyed with `row + 1`, then a full new row is
+   * added at row 0. The row-0 column count applies to the new row (even row,
+   * so `GRID_COLS` columns).
+   */
+  advanceRows(): void {
+    const entries = [...this.cells.entries()]
+    this.cells.clear()
+    for (const [key, type] of entries) {
+      const pos = this.parseKey(key)
+      this.setHat({ row: pos.row + 1, col: pos.col }, type)
+    }
+    const cols = this.colCount(0)
+    for (let col = 0; col < cols; col++) {
+      const type = Math.floor(Math.random() * HAT_TYPE_COUNT) as HatType
+      this.setHat({ row: 0, col }, type)
+    }
+  }
+
+  /**
    * Finds the best empty grid cell for a projectile hat to land in after
    * colliding with the hat at `hitPos`.
    *

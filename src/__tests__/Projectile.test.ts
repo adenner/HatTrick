@@ -92,6 +92,43 @@ describe('Projectile', () => {
     })
   })
 
+  describe('active flag', () => {
+    it('new projectile starts with active === true', () => {
+      const p = new Projectile(300, 600, 0, HatType.FEDORA)
+      expect(p.active).toBe(true)
+    })
+  })
+
+  describe('update() return value', () => {
+    it('returns false when no wall is hit', () => {
+      const p = new Projectile(300, 600, 0, HatType.FEDORA)
+      expect(p.update()).toBe(false)
+    })
+
+    it('returns true on left-wall bounce', () => {
+      const p = new Projectile(HAT_RADIUS, 300, -45, HatType.TOP_HAT)
+      p.x = HAT_RADIUS - 5
+      expect(p.update()).toBe(true)
+    })
+
+    it('returns true on right-wall bounce', () => {
+      const p = new Projectile(CANVAS_WIDTH - HAT_RADIUS, 300, 45, HatType.TOP_HAT)
+      p.x = CANVAS_WIDTH - HAT_RADIUS + 5
+      expect(p.update()).toBe(true)
+    })
+  })
+
+  describe('hasHitHat — exact GridPos', () => {
+    it('returns the exact GridPos of the struck hat', () => {
+      const grid = new Grid()
+      grid.setHat({ row: 2, col: 3 }, HatType.COWBOY)
+      const { x, y } = grid.toPixel({ row: 2, col: 3 })
+      const p = new Projectile(x + HAT_RADIUS - 2, y, 0, HatType.BERET)
+      const hit = p.hasHitHat(grid)
+      expect(hit).toEqual({ row: 2, col: 3 })
+    })
+  })
+
   describe('trajectory over frames', () => {
     it('moves upward each frame for straight shot', () => {
       const p = new Projectile(300, 600, 0, HatType.TOP_HAT)
@@ -119,6 +156,12 @@ describe('computeAimLine', () => {
     expect(pts[0].y).toBe(600)
   })
 
+  it('straight-up shot (angle 0) produces exactly 2 points: start and ceiling', () => {
+    const pts = computeAimLine(300, 600, 0, CANVAS_WIDTH)
+    expect(pts).toHaveLength(2)
+    expect(pts[1].y).toBeCloseTo(HAT_RADIUS, 1)
+  })
+
   it('terminates at ceiling for straight-up shot', () => {
     const pts = computeAimLine(300, 600, 0, CANVAS_WIDTH)
     const last = pts[pts.length - 1]
@@ -133,6 +176,19 @@ describe('computeAimLine', () => {
   it('never exceeds canvas bounds', () => {
     const pts = computeAimLine(300, 600, 70, CANVAS_WIDTH, 6)
     expect(pts.every(p => p.x >= 0 && p.x <= CANVAS_WIDTH)).toBe(true)
+  })
+})
+
+describe('simulateLanding (wall-bounce path)', () => {
+  it('lands in a valid cell after a bouncing shot', () => {
+    const grid = new Grid()
+    grid.fillInitialGrid(INITIAL_ROWS)
+    // Fire hard right so the projectile must bounce off the right wall first
+    const result = simulateLanding(300, 640, 70, grid, CANVAS_WIDTH)
+    if (result !== null) {
+      expect(grid.isValidPos(result)).toBe(true)
+      expect(grid.hasHat(result)).toBe(false)
+    }
   })
 })
 

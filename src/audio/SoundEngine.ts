@@ -50,6 +50,7 @@ export class SoundEngine {
   private ctx: AudioContext | null = null
   private master: GainNode | null = null
   private _muted = false
+  private _destroyed = false
 
   /**
    * Whether the engine is currently muted.
@@ -89,15 +90,15 @@ export class SoundEngine {
    * once the context is already running.
    */
   resume(): void {
-    this.getCtx()
+    if (!this._destroyed) this.getCtx()
   }
 
   /**
    * Plays the named sound effect, optionally scaled by a combo multiplier.
    *
-   * The call is a no-op when {@link muted} is `true`. Each sound is
-   * synthesised immediately using Web Audio API nodes that are scheduled to
-   * auto-stop; no cleanup is required by the caller.
+   * The call is a no-op when {@link muted} is `true` or after {@link destroy}
+   * has been called. Each sound is synthesised immediately using Web Audio API
+   * nodes that are scheduled to auto-stop; no cleanup is required by the caller.
    *
    * @param name  - The identifier of the sound effect to play.
    * @param combo - Combo level passed to the `'match'` sound to raise its
@@ -105,8 +106,8 @@ export class SoundEngine {
    *   internally. Ignored for all other sound names. Defaults to `1`.
    */
   play(name: SoundName, combo = 1): void {
+    if (this._muted || this._destroyed) return
     const ctx = this.getCtx()
-    if (this._muted) return
 
     switch (name) {
       case 'shoot':  this.playShoot(ctx); break
@@ -134,7 +135,7 @@ export class SoundEngine {
       this.master.connect(this.ctx.destination)
     }
     if (this.ctx.state === 'suspended') {
-      void this.ctx.resume()
+      this.ctx.resume().catch(() => { /* browser autoplay policy — safe to ignore */ })
     }
     return this.ctx
   }
@@ -350,6 +351,7 @@ export class SoundEngine {
    * `SoundEngine` instance if audio is needed again.
    */
   destroy(): void {
+    this._destroyed = true
     void this.ctx?.close()
     this.ctx = null
     this.master = null

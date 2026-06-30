@@ -274,9 +274,10 @@ export class Grid {
     const visited = new Set<string>()
     const queue: GridPos[] = [startPos]
     visited.add(this.key(startPos))
+    let head = 0
 
-    while (queue.length > 0) {
-      const current = queue.shift()!
+    while (head < queue.length) {
+      const current = queue[head++]
       for (const adj of this.getAdjacentPositions(current)) {
         const k = this.key(adj)
         if (!visited.has(k) && this.getHat(adj) === type) {
@@ -317,8 +318,9 @@ export class Grid {
       }
     }
 
-    while (queue.length > 0) {
-      const current = queue.shift()!
+    let head = 0
+    while (head < queue.length) {
+      const current = queue[head++]
       for (const adj of this.getAdjacentPositions(current)) {
         const k = this.key(adj)
         if (!connected.has(k) && this.hasHat(adj)) {

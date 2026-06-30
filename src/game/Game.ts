@@ -75,7 +75,7 @@ export class Game {
       (x, y) => this.handleAim(x, y),
       (key) => this.handleKey(key),
     )
-    this.highScore = parseInt(localStorage.getItem(HIGH_SCORE_KEY) ?? '0', 10) || 0
+    this.highScore = parseInt(localStorage.getItem(HIGH_SCORE_KEY) ?? '0', 10)
   }
 
   /**
@@ -141,16 +141,16 @@ export class Game {
    *
    * Does nothing when there is no active projectile.
    *
-   * @param _delta - Elapsed time in ms since the last frame (currently unused
-   *   because all motion uses per-frame constants rather than delta-time).
+   * @param delta - Elapsed time in ms since the last frame. Used to normalise
+   *   particle physics so they run at the same speed on any display refresh rate.
    */
-  private update(_delta: number): void {
-    // Update falling hats
+  private update(delta: number): void {
+    const dt = delta / (1000 / 60)  // normalise to 60 fps basis
     this.fallingHats = this.fallingHats.filter(h => {
-      h.vy += 0.4
-      h.y += h.vy
-      h.x += h.vx
-      h.opacity -= 0.018
+      h.vy += 0.4 * dt
+      h.y += h.vy * dt
+      h.x += h.vx * dt
+      h.opacity -= 0.018 * dt
       return h.opacity > 0 && h.y < CANVAS_HEIGHT + HAT_RADIUS
     })
 
@@ -233,7 +233,10 @@ export class Game {
       this.sound.play('match', this.combo)
       if (fallenHats.length > 0) {
         // Slight delay so fall sound doesn't clash with match sound
-        setTimeout(() => this.sound.play('fall'), 120)
+        const id = setTimeout(() => {
+          clearTimeout(id)
+          this.sound.play('fall')
+        }, 120)
       }
 
       for (const hat of [...matchedHats, ...fallenHats]) {
@@ -298,11 +301,7 @@ export class Game {
     // Unlock AudioContext on first user gesture
     this.sound.resume()
 
-    if (this.phase === 'menu') {
-      this.startNewGame()
-      return
-    }
-    if (this.phase === 'won' || this.phase === 'lost') {
+    if (this.phase === 'menu' || this.phase === 'won' || this.phase === 'lost') {
       this.startNewGame()
       return
     }

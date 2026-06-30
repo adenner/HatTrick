@@ -8,6 +8,11 @@ import {
 } from '../types'
 import { Grid } from './Grid'
 
+function angleToVelocity(angleDeg: number, speed = PROJECTILE_SPEED): { vx: number; vy: number } {
+  const rad = (angleDeg * Math.PI) / 180
+  return { vx: speed * Math.sin(rad), vy: -speed * Math.cos(rad) }
+}
+
 /**
  * Represents a hat projectile fired by the player.
  *
@@ -56,9 +61,9 @@ export class Projectile {
     this.x = x
     this.y = y
     this.type = type
-    const rad = (angleDeg * Math.PI) / 180
-    this.vx = PROJECTILE_SPEED * Math.sin(rad)
-    this.vy = -PROJECTILE_SPEED * Math.cos(rad)
+    const { vx, vy } = angleToVelocity(angleDeg)
+    this.vx = vx
+    this.vy = vy
   }
 
   /**
@@ -152,11 +157,9 @@ export function simulateLanding(
   grid: Grid,
   canvasWidth: number,
 ): GridPos | null {
-  const rad = (angleDeg * Math.PI) / 180
   let x = startX
   let y = startY
-  let vx = PROJECTILE_SPEED * Math.sin(rad)
-  let vy = -PROJECTILE_SPEED * Math.cos(rad)
+  let { vx, vy } = angleToVelocity(angleDeg)
   const MAX_STEPS = 600
 
   for (let i = 0; i < MAX_STEPS; i++) {
@@ -225,7 +228,7 @@ export function computeAimLine(
   let x = startX
   let y = startY
 
-  for (let bounce = 0; bounce < maxBounces && y > 0; bounce++) {
+  for (let bounce = 0; bounce < maxBounces; bounce++) {
     // Time-to-left-wall
     const tLeft = vx < 0 ? (HAT_RADIUS - x) / vx : Infinity
     // Time-to-right-wall

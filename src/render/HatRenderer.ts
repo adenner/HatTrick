@@ -14,9 +14,11 @@ import { HAT_SPRITES, SvgLayer } from '../sprites/hats'
 function drawLayers(ctx: OffscreenCanvasRenderingContext2D, layers: SvgLayer[]): void {
   for (const layer of layers) {
     const path = new Path2D(layer.d)
-    ctx.fillStyle = layer.fill
-    ctx.fill(path)
-    if (layer.stroke) {
+    if (layer.fill !== 'none') {
+      ctx.fillStyle = layer.fill
+      ctx.fill(path)
+    }
+    if (layer.stroke && layer.stroke !== 'none') {
       ctx.strokeStyle = layer.stroke
       ctx.lineWidth = layer.strokeWidth ?? 1
       ctx.stroke(path)
@@ -112,12 +114,13 @@ export class HatRenderer {
 
     drawLayers(ctx, sprite.layers)
 
-    // Outline circle to unify shape
+    // Outline circle to unify shape (1 design-px inside the 24px design radius)
+    const DESIGN_RADIUS = 24
     ctx.shadowBlur = 0
     ctx.strokeStyle = 'rgba(255,255,255,0.15)'
     ctx.lineWidth = 1
     ctx.beginPath()
-    ctx.arc(0, 0, 23, 0, Math.PI * 2)
+    ctx.arc(0, 0, DESIGN_RADIUS - 1, 0, Math.PI * 2)
     ctx.stroke()
 
     this.cache.set(type, await createImageBitmap(offscreen))

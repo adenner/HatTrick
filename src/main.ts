@@ -20,6 +20,12 @@ async function main(): Promise<void> {
   }, { once: true })
 }
 
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  })
+}
+
 main().catch(err => {
   console.error('Hat Trick failed to start:', err)
   const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement | null

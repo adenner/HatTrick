@@ -78,6 +78,33 @@ export interface FallingHat {
   opacity: number
 }
 
+/**
+ * A single rectangular particle used in the win-celebration confetti burst.
+ * Particles spawn near the top of the canvas and drift downward under gravity.
+ */
+export interface ConfettiParticle {
+  /** Horizontal position of the particle centre, in px. */
+  x: number
+  /** Vertical position of the particle centre, in px. */
+  y: number
+  /** Horizontal velocity, in px per normalised frame. */
+  vx: number
+  /** Vertical velocity (positive = downward), in px per normalised frame. */
+  vy: number
+  /** CSS colour string for this particle's fill. */
+  color: string
+  /** Current rotation angle in radians. */
+  rotation: number
+  /** Angular velocity in radians per normalised frame. */
+  rotationSpeed: number
+  /** Width of the rectangle in px. */
+  width: number
+  /** Height of the rectangle in px. */
+  height: number
+  /** Alpha transparency in [0, 1]; particles fade as they drift. */
+  opacity: number
+}
+
 // ---------------------------------------------------------------------------
 // Canvas dimensions
 // ---------------------------------------------------------------------------

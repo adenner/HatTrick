@@ -243,10 +243,6 @@ export class Grid {
    * at `startPos`, but only returns the group if it meets the minimum match
    * size threshold (`MIN_MATCH_COUNT`).
    *
-   * Use this method to determine whether a newly landed hat triggers a removal.
-   * For a preview that always shows the full group regardless of size, use
-   * {@link findMatchesAll}.
-   *
    * @param startPos - The grid position from which the flood-fill begins.
    * @param type     - The hat type to match against neighbours.
    * @returns A `Set` of key strings for all matched positions when the group
@@ -260,10 +256,6 @@ export class Grid {
   /**
    * BFS flood-fill that returns the complete connected group of same-type hats
    * starting at `startPos`, regardless of group size.
-   *
-   * This is the underlying implementation used by {@link findMatches}. It is
-   * exposed separately so that the targeting preview can highlight the full
-   * connected group even when it is smaller than `MIN_MATCH_COUNT`.
    *
    * @param startPos - The grid position from which the flood-fill begins.
    * @param type     - The hat type to match against neighbours.
@@ -293,15 +285,8 @@ export class Grid {
   /**
    * Identifies hats that are no longer connected to the ceiling (row 0).
    *
-   * Performs a BFS starting from every hat in row 0 to find the fully
-   * connected component. Any hat not reachable from row 0 is considered
-   * "floating" and should fall from the playfield.
-   *
-   * This method should be called **after** matched hats have already been
-   * removed so that the connectivity check reflects the updated grid state.
-   *
-   * @returns A `Set` of key strings (in `"row,col"` format) for all hats
-   *   that have no path back to the ceiling row.
+   * @returns A `Set` of key strings for all hats that have no path back to
+   *   the ceiling row.
    */
   findDisconnected(): Set<string> {
     const connected = new Set<string>()
@@ -342,12 +327,8 @@ export class Grid {
   /**
    * Removes hats identified by their key strings and returns their data.
    *
-   * This is typically called with the result of {@link findMatches} or
-   * {@link findDisconnected} to batch-remove hats after a match or a fall.
-   *
    * @param keys - A `Set` of `"row,col"` key strings identifying hats to remove.
-   * @returns An array of `GridHat` objects describing each removed hat's
-   *   position and type, in iteration order of `keys`.
+   * @returns An array of `GridHat` objects describing each removed hat.
    */
   removeByKeys(keys: Set<string>): GridHat[] {
     const removed: GridHat[] = []
@@ -365,9 +346,6 @@ export class Grid {
   /**
    * Returns the index of the lowest (highest Y) occupied row in the grid.
    *
-   * "Lowest" refers to visual position on screen — i.e., the row with the
-   * greatest row index, which is rendered nearest the bottom of the canvas.
-   *
    * @returns The maximum occupied row index, or `-1` if the grid is empty.
    */
   getLowestRow(): number {
@@ -380,12 +358,9 @@ export class Grid {
   }
 
   /**
-   * Returns the canvas Y coordinate of the bottom edge of the lowest occupied
-   * row. This is used to detect when hats have descended too far and the
-   * player has lost.
+   * Returns the canvas Y coordinate of the bottom edge of the lowest occupied row.
    *
-   * @returns The bottom-edge Y pixel coordinate of the lowest occupied row,
-   *   or `0` if the grid is empty.
+   * @returns The bottom-edge Y pixel coordinate, or `0` if the grid is empty.
    */
   getLowestOccupiedY(): number {
     const row = this.getLowestRow()
@@ -394,11 +369,7 @@ export class Grid {
   }
 
   /**
-   * Populates the grid with randomly typed hats to create the initial game
-   * state. Clears any existing hats before filling.
-   *
-   * Each cell in the first `rows` rows is assigned a uniformly random
-   * `HatType` from the full set of available types.
+   * Populates the grid with randomly typed hats to create the initial game state.
    *
    * @param rows - The number of rows to fill from the top of the grid.
    */
@@ -415,11 +386,7 @@ export class Grid {
 
   /**
    * Shifts every existing hat down by one row and seeds a new random row at
-   * the ceiling (row 0). Called periodically during play to increase difficulty.
-   *
-   * All occupied cells are re-keyed with `row + 1`, then a full new row is
-   * added at row 0. The row-0 column count applies to the new row (even row,
-   * so `GRID_COLS` columns).
+   * the ceiling (row 0).
    */
   advanceRows(): void {
     const entries = [...this.cells.entries()]
@@ -439,17 +406,10 @@ export class Grid {
    * Finds the best empty grid cell for a projectile hat to land in after
    * colliding with the hat at `hitPos`.
    *
-   * Checks all empty cells adjacent to `hitPos` and returns the one whose
-   * pixel center is closest to the impact pixel `(px, py)`. If there are no
-   * free adjacent cells (e.g., the hit hat is completely surrounded),
-   * falls back to {@link snapToGrid} to find the nearest free cell anywhere
-   * near the impact point.
-   *
    * @param hitPos - The grid position of the hat that was struck.
    * @param px     - The x canvas pixel coordinate of the collision point.
    * @param py     - The y canvas pixel coordinate of the collision point.
-   * @returns The `GridPos` of the chosen landing cell, or `null` if no
-   *   suitable empty cell could be found.
+   * @returns The `GridPos` of the chosen landing cell, or `null` if none found.
    */
   findLandingCell(hitPos: GridPos, px: number, py: number): GridPos | null {
     const candidates = this.getAdjacentPositions(hitPos).filter(
@@ -457,7 +417,6 @@ export class Grid {
     )
 
     if (candidates.length === 0) {
-      // Fallback: snap to nearest free cell anywhere near the hit
       return this.snapToGrid(px, py)
     }
 
@@ -472,6 +431,20 @@ export class Grid {
       }
     }
     return best
+  }
+
+  /**
+   * Returns the distinct set of hat types currently present on the grid.
+   *
+   * Used by the shooter queue so that it only offers types the player can
+   * actually use to make matches.
+   *
+   * @returns An array of unique `HatType` values. Empty when the grid is empty.
+   */
+  getActiveTypes(): HatType[] {
+    const set = new Set<HatType>()
+    for (const type of this.cells.values()) set.add(type)
+    return [...set]
   }
 
   /**

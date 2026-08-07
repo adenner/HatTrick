@@ -1,0 +1,24 @@
+{
+  "name": "Hat Trick",
+  "short_name": "Hat Trick",
+  "description": "A hat-shooting puzzle game — match 3 or more hats to pop them!",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0d0d2b",
+  "theme_color": "#8844ff",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='24' fill='%230d0d2b'/%3E%3Cellipse cx='96' cy='130' rx='64' ry='16' fill='%23222244'/%3E%3Crect x='72' y='60' width='48' height='70' rx='4' fill='%23111111'/%3E%3Crect x='32' y='120' width='128' height='18' rx='4' fill='%23222222'/%3E%3Crect x='72' y='114' width='48' height='12' fill='%23cc4400'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='64' fill='%230d0d2b'/%3E%3Cellipse cx='256' cy='346' rx='170' ry='42' fill='%23222244'/%3E%3Crect x='192' y='160' width='128' height='186' rx='8' fill='%23111111'/%3E%3Crect x='86' y='320' width='340' height='48' rx='8' fill='%23222222'/%3E%3Crect x='192' y='304' width='128' height='32' fill='%23cc4400'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

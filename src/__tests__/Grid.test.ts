@@ -154,7 +154,7 @@ describe('Grid', () => {
       grid.setHat({ row: 0, col: 0 }, HatType.COWBOY)
       grid.setHat({ row: 0, col: 1 }, HatType.COWBOY)
       grid.setHat({ row: 0, col: 2 }, HatType.COWBOY)
-      grid.setHat({ row: 0, col: 3 }, HatType.FEDORA) // different type
+      grid.setHat({ row: 0, col: 3 }, HatType.FEDORA)
       const matches = grid.findMatches({ row: 0, col: 0 }, HatType.COWBOY)
       expect(matches.size).toBe(3)
       expect([...matches].some(k => k === '0,3')).toBe(false)
@@ -179,18 +179,12 @@ describe('Grid', () => {
     })
 
     it('detects floating hats after bridge removal', () => {
-      // Row 0: anchor
       grid.setHat({ row: 0, col: 3 }, HatType.TOP_HAT)
-      // Row 1: bridge (even row r=0, so (r+1,c-1) and (r+1,c) from col 3 = (1,2) and (1,3))
-      grid.setHat({ row: 1, col: 2 }, HatType.FEDORA) // bridge
-      // Row 2: hanging below bridge
-      // odd row r=1, so (r+1,c) and (r+1,c+1) from col 2 = (2,2) and (2,3)
+      grid.setHat({ row: 1, col: 2 }, HatType.FEDORA)
       grid.setHat({ row: 2, col: 2 }, HatType.WITCH)
 
-      // All connected at this point
       expect(grid.findDisconnected().size).toBe(0)
 
-      // Remove the bridge
       grid.removeHat({ row: 1, col: 2 })
 
       const disconnected = grid.findDisconnected()
@@ -221,7 +215,6 @@ describe('Grid', () => {
   describe('fillInitialGrid', () => {
     it('creates correct number of hats', () => {
       grid.fillInitialGrid(3)
-      // Row 0: 13, Row 1: 12, Row 2: 13 = 38
       expect(grid.size).toBe(13 + 12 + 13)
     })
 
@@ -267,12 +260,8 @@ describe('Grid', () => {
     })
 
     it('returns null when all candidate cells are occupied', () => {
-      // Fill rows 0 and 1 completely so the search area is saturated
       grid.fillInitialGrid(2)
-      // Snap to row 0 center — all cells in search range are taken
       const result = grid.snapToGrid(HAT_RADIUS, HAT_RADIUS)
-      // Should fall back to null or a free cell outside rows 0-1
-      // (depends on search range) — mainly confirm it doesn't throw
       expect(result === null || typeof result === 'object').toBe(true)
     })
 
@@ -280,7 +269,6 @@ describe('Grid', () => {
       grid.setHat({ row: 0, col: 0 }, HatType.TOP_HAT)
       const { x, y } = grid.toPixel({ row: 0, col: 0 })
       const result = grid.snapToGrid(x, y)
-      // Should NOT return {row:0, col:0} since it is occupied
       expect(result).not.toEqual({ row: 0, col: 0 })
     })
   })
@@ -328,7 +316,6 @@ describe('Grid', () => {
 
   describe('findMatches (diagonal / multi-row)', () => {
     it('finds a match spanning two rows via diagonal adjacency', () => {
-      // Even row 0, col 3 → diagonals to odd row 1 are (1,2) and (1,3)
       grid.setHat({ row: 0, col: 3 }, HatType.WITCH)
       grid.setHat({ row: 1, col: 2 }, HatType.WITCH)
       grid.setHat({ row: 1, col: 3 }, HatType.WITCH)
@@ -343,10 +330,42 @@ describe('Grid', () => {
     it('all hat types are within valid enum range', () => {
       grid.fillInitialGrid(4)
       const hats = grid.getAllHats()
-      // Use Object.values(HatType) rather than hardcoded 0-6 so the check
-      // stays correct if HAT_TYPE_COUNT ever changes
       const validTypes = new Set([0, 1, 2, 3, 4, 5, 6])
       expect(hats.every(h => validTypes.has(h.type))).toBe(true)
+    })
+  })
+
+  // --- getActiveTypes ---
+
+  describe('getActiveTypes', () => {
+    it('returns empty array for empty grid', () => {
+      expect(grid.getActiveTypes()).toHaveLength(0)
+    })
+
+    it('returns only the types present on the grid', () => {
+      grid.setHat({ row: 0, col: 0 }, HatType.TOP_HAT)
+      grid.setHat({ row: 0, col: 1 }, HatType.FEDORA)
+      grid.setHat({ row: 0, col: 2 }, HatType.TOP_HAT)
+      const types = grid.getActiveTypes()
+      expect(types).toHaveLength(2)
+      expect(types).toContain(HatType.TOP_HAT)
+      expect(types).toContain(HatType.FEDORA)
+    })
+
+    it('returns all types when all are present', () => {
+      for (let i = 0; i < 7; i++) {
+        grid.setHat({ row: 0, col: i }, i as HatType)
+      }
+      expect(grid.getActiveTypes()).toHaveLength(7)
+    })
+
+    it('updates when hats are removed', () => {
+      grid.setHat({ row: 0, col: 0 }, HatType.WITCH)
+      grid.setHat({ row: 0, col: 1 }, HatType.COWBOY)
+      grid.removeHat({ row: 0, col: 1 })
+      const types = grid.getActiveTypes()
+      expect(types).toHaveLength(1)
+      expect(types).toContain(HatType.WITCH)
     })
   })
 
@@ -359,13 +378,12 @@ describe('Grid', () => {
       grid.advanceRows()
       expect(grid.getHat({ row: 1, col: 0 })).toBe(HatType.TOP_HAT)
       expect(grid.getHat({ row: 1, col: 1 })).toBe(HatType.FEDORA)
-      expect(grid.getHat({ row: 0, col: 0 })).not.toBeNull() // new row seeded
+      expect(grid.getHat({ row: 0, col: 0 })).not.toBeNull()
     })
 
     it('seeds a full row 0 after advancing', () => {
       grid.setHat({ row: 0, col: 0 }, HatType.WITCH)
       grid.advanceRows()
-      // Row 0 (even) should have GRID_COLS hats
       let row0Count = 0
       for (let col = 0; col < GRID_COLS; col++) {
         if (grid.getHat({ row: 0, col }) !== null) row0Count++
@@ -376,7 +394,6 @@ describe('Grid', () => {
     it('does not leave any row-0 hats from the old layout', () => {
       grid.setHat({ row: 0, col: 2 }, HatType.BERET)
       grid.advanceRows()
-      // The hat that was at row 0 is now at row 1
       expect(grid.getHat({ row: 1, col: 2 })).toBe(HatType.BERET)
     })
 
@@ -384,7 +401,6 @@ describe('Grid', () => {
       grid.fillInitialGrid(3)
       const before = grid.size
       grid.advanceRows()
-      // One new row 0 added (GRID_COLS = 13 hats for even row)
       expect(grid.size).toBe(before + GRID_COLS)
     })
   })
@@ -405,7 +421,7 @@ describe('Grid', () => {
       const all = grid.findMatchesAll({ row: 0, col: 0 }, HatType.WITCH)
       const strict = grid.findMatches({ row: 0, col: 0 }, HatType.WITCH)
       expect(all.size).toBe(2)
-      expect(strict.size).toBe(0) // below minimum
+      expect(strict.size).toBe(0)
     })
 
     it('returns same result as findMatches when group >= MIN_MATCH_COUNT', () => {

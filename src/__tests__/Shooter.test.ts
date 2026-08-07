@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { Shooter } from '../game/Shooter'
-import { MAX_ANGLE_DEG, SHOOTER_X, SHOOTER_Y } from '../types'
+import { HatType, MAX_ANGLE_DEG, SHOOTER_X, SHOOTER_Y } from '../types'
 
 describe('Shooter', () => {
   describe('aimAt', () => {
@@ -82,14 +82,12 @@ describe('Shooter', () => {
     })
 
     it('generates a new nextType after firing', () => {
-      // This is probabilistic, but after many fires the types should vary
       const s = new Shooter()
       const types = new Set<number>()
       for (let i = 0; i < 50; i++) {
         types.add(s.nextType)
         s.fire()
       }
-      // Should have seen more than 1 type over 50 fires
       expect(types.size).toBeGreaterThan(1)
     })
 
@@ -98,6 +96,76 @@ describe('Shooter', () => {
       const expectedType = s.currentType
       const proj = s.fire()
       expect(proj.type).toBe(expectedType)
+    })
+  })
+
+  describe('hold / swap', () => {
+    it('hold is null on a fresh shooter', () => {
+      const s = new Shooter()
+      expect(s.holdType).toBeNull()
+    })
+
+    it('first hold stashes current and advances queue', () => {
+      const s = new Shooter()
+      const original = s.currentType
+      const nextBefore = s.nextType
+      s.hold()
+      expect(s.holdType).toBe(original)
+      expect(s.currentType).toBe(nextBefore)
+    })
+
+    it('second hold swaps current with hold, leaves nextType unchanged', () => {
+      const s = new Shooter()
+      s.hold()
+      const heldType = s.holdType!
+      const currentAfterHold = s.currentType
+      const nextBeforeSwap = s.nextType
+      s.hold()
+      expect(s.currentType).toBe(heldType)
+      expect(s.holdType).toBe(currentAfterHold)
+      expect(s.nextType).toBe(nextBeforeSwap)
+    })
+
+    it('repeated holds toggle between two types', () => {
+      const s = new Shooter()
+      s.hold()
+      const a = s.currentType
+      const b = s.holdType!
+      s.hold()
+      expect(s.currentType).toBe(b)
+      expect(s.holdType).toBe(a)
+      s.hold()
+      expect(s.currentType).toBe(a)
+      expect(s.holdType).toBe(b)
+    })
+  })
+
+  describe('setTypePool', () => {
+    it('restricts future nextType draws to the provided pool', () => {
+      const s = new Shooter()
+      s.setTypePool([HatType.WITCH])
+      for (let i = 0; i < 20; i++) {
+        s.fire()
+        expect(s.nextType).toBe(HatType.WITCH)
+      }
+    })
+
+    it('re-seeds nextType if it is no longer in the pool', () => {
+      const s = new Shooter()
+      s.nextType = HatType.FEDORA
+      s.setTypePool([HatType.WITCH, HatType.COWBOY])
+      expect(s.nextType).not.toBe(HatType.FEDORA)
+    })
+
+    it('falls back to all types when given an empty pool', () => {
+      const s = new Shooter()
+      s.setTypePool([])
+      const types = new Set<number>()
+      for (let i = 0; i < 50; i++) {
+        s.fire()
+        types.add(s.nextType)
+      }
+      expect(types.size).toBeGreaterThan(1)
     })
   })
 

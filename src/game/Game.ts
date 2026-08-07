@@ -1,6 +1,7 @@
 import {
   GamePhase,
   FallingHat,
+  ConfettiParticle,
   GridPos,
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
@@ -27,21 +28,6 @@ const MAX_DELTA_MS = 50
  *
  * `Game` owns every subsystem — grid, shooter, projectile, renderer, input,
  * and audio — and is the single source of truth for all mutable game state.
- * It drives the `requestAnimationFrame` loop, routes input events to the
- * correct handlers, and assembles a {@link RenderState} snapshot each frame
- * for the {@link Renderer} to consume.
- *
- * Typical lifecycle:
- * ```ts
- * const game = new Game(canvas)
- * await game.init()   // pre-render assets
- * game.start()        // begin the RAF loop (shows menu)
- * // ... player interacts ...
- * game.destroy()      // cancel RAF, detach listeners, free GPU memory
- * ```
- *
- * The state machine progresses through {@link GamePhase} values:
- * `menu` → `playing` → (`paused` ↔ `playing`) → `won` | `lost` → `playing` …
  */
 export class Game {
   private phase: GamePhase = 'menu'
@@ -57,6 +43,14 @@ export class Game {
   private targetCell: GridPos | null = null
   private targetGroup: Set<string> = new Set()
   private shotsUntilAdvance = SHOTS_PER_ADVANCE
+  private level = 0
+  private colorBlindMode = false
+
+  private shakeFrames = 0
+  private shakeX = 0
+  private shakeY = 0
+
+  private confetti: ConfettiParticle[] = []
 
   private readonly renderer: Renderer
   private readonly hatRenderer: HatRenderer
@@ -80,13 +74,7 @@ export class Game {
     this.highScore = parseInt(localStorage.getItem(HIGH_SCORE_KEY) ?? '0', 10)
   }
 
-  /**
-   * Asynchronously pre-renders all game assets before the first frame is drawn.
-   *
-   * Runs {@link HatRenderer.prerender} and {@link Renderer.init} in parallel so
-   * that both hat sprite bitmaps and the static background bitmap are ready
-   * before gameplay begins.  Must be `await`-ed before calling {@link start}.
-   */
+  /** Pre-renders all game assets before the first frame is drawn. */
   async init(): Promise<void> {
     await Promise.all([
       this.hatRenderer.prerender(),
@@ -94,30 +82,12 @@ export class Game {
     ])
   }
 
-  /**
-   * Enters the menu phase and kicks off the `requestAnimationFrame` render loop.
-   *
-   * After this call returns, the game loop runs autonomously until
-   * {@link destroy} is called.  Call {@link init} first to ensure assets are
-   * ready.
-   */
+  /** Enters the menu phase and kicks off the `requestAnimationFrame` render loop. */
   start(): void {
     this.phase = 'menu'
     this.loop(0)
   }
 
-  /**
-   * Core animation loop — called by `requestAnimationFrame` on every display
-   * refresh.
-   *
-   * Computes the elapsed time since the previous frame (capped at
-   * `MAX_DELTA_MS` to prevent large jumps after tab focus is restored),
-   * advances the simulation when playing, renders the current frame, and
-   * schedules the next iteration.
-   *
-   * @param timestamp - High-resolution timestamp supplied by the browser's RAF
-   *   callback, in milliseconds.
-   */
   private loop(timestamp: number): void {
     const delta = Math.min(timestamp - this.lastTimestamp, MAX_DELTA_MS)
     this.lastTimestamp = timestamp
@@ -126,28 +96,33 @@ export class Game {
       this.update(delta)
     }
 
+    // Shake and confetti run regardless of phase
+    const dt = delta / (1000 / 60)
+    if (this.shakeFrames > 0) {
+      const t = this.shakeFrames / 10
+      this.shakeX = (Math.random() - 0.5) * 8 * t
+      this.shakeY = (Math.random() - 0.5) * 4 * t
+      this.shakeFrames--
+    } else {
+      this.shakeX = 0
+      this.shakeY = 0
+    }
+
+    this.confetti = this.confetti.filter(p => {
+      p.x += p.vx * dt
+      p.y += p.vy * dt
+      p.vy += 0.05 * dt
+      p.rotation += p.rotationSpeed * dt
+      p.opacity -= 0.004 * dt
+      return p.opacity > 0 && p.y < CANVAS_HEIGHT + 20
+    })
+
     this.renderer.render(this.buildRenderState())
     this.animationId = requestAnimationFrame(t => this.loop(t))
   }
 
-  /**
-   * Advances all in-flight simulation state by one frame.
-   *
-   * Responsibilities (in order):
-   * 1. Steps falling-hat particles (gravity, fade) and culls any that have
-   *    either fully faded out or scrolled below the canvas.
-   * 2. Updates the active projectile's position via {@link Projectile.update};
-   *    plays a bounce sound if a wall reflection occurred.
-   * 3. Checks for hat-collision first (the projectile hit an existing grid hat)
-   *    then ceiling collision, and calls {@link snapAndResolve} for either.
-   *
-   * Does nothing when there is no active projectile.
-   *
-   * @param delta - Elapsed time in ms since the last frame. Used to normalise
-   *   particle physics so they run at the same speed on any display refresh rate.
-   */
   private update(delta: number): void {
-    const dt = delta / (1000 / 60)  // normalise to 60 fps basis
+    const dt = delta / (1000 / 60)
     this.fallingHats = this.fallingHats.filter(h => {
       h.vy += 0.4 * dt
       h.y += h.vy * dt
@@ -161,7 +136,6 @@ export class Game {
     const bounced = this.projectile.update()
     if (bounced) this.sound.play('bounce')
 
-    // Check hat collision first (takes priority over ceiling)
     const hitPos = this.projectile.hasHitHat(this.grid)
     if (hitPos) {
       const landPos = this.grid.findLandingCell(hitPos, this.projectile.x, this.projectile.y)
@@ -175,7 +149,6 @@ export class Game {
       return
     }
 
-    // Ceiling collision
     if (this.projectile.hasHitCeiling()) {
       const landPos = this.grid.snapToGrid(this.projectile.x, HAT_RADIUS)
       if (landPos) {
@@ -187,28 +160,6 @@ export class Game {
     }
   }
 
-  /**
-   * Places the in-flight projectile into the grid at `landPos` and resolves
-   * all downstream consequences of that placement.
-   *
-   * Resolution order:
-   * 1. The projectile's hat type is written into `landPos` via
-   *    {@link Grid.setHat}.
-   * 2. A BFS match search ({@link Grid.findMatches}) finds all same-type
-   *    neighbours connected to `landPos`.
-   * 3. **If a match of `>= MIN_MATCH_COUNT` is found:**
-   *    - The matched hats are removed and converted to falling particles.
-   *    - A disconnection sweep ({@link Grid.findDisconnected}) is run; any
-   *      newly floating hats are also removed and sent falling.
-   *    - Score and combo are updated via {@link calculateShotScore}.
-   *    - Match and fall sounds are triggered.
-   *    - If the grid is now empty, the player wins.
-   * 4. **On a miss** (group too small): combo resets to 1 and a land sound plays.
-   * 5. {@link checkLoss} is called to detect danger-line overflow.
-   * 6. The targeting overlay is refreshed for the next shot.
-   *
-   * @param landPos - Grid cell (`row`, `col`) where the projectile will snap.
-   */
   private snapAndResolve(landPos: { row: number; col: number }): void {
     if (!this.projectile) return
     const type = this.projectile.type
@@ -217,11 +168,15 @@ export class Game {
 
     this.grid.setHat(landPos, type)
 
-    // Advance the grid periodically to ramp up difficulty
     this.shotsUntilAdvance--
+    if (this.shotsUntilAdvance === 1 || this.shotsUntilAdvance === 2) {
+      this.sound.play('alert')
+    }
     if (this.shotsUntilAdvance <= 0) {
-      this.shotsUntilAdvance = SHOTS_PER_ADVANCE
+      this.level++
+      this.shotsUntilAdvance = Math.max(4, SHOTS_PER_ADVANCE - Math.floor(this.level / 2))
       this.grid.advanceRows()
+      this.shakeFrames = 10
       this.checkLoss()
       if (this.phase !== 'playing') return
     }
@@ -243,7 +198,6 @@ export class Game {
 
       this.sound.play('match', this.combo)
       if (fallenHats.length > 0) {
-        // Slight delay so fall sound doesn't clash with match sound
         const id = setTimeout(() => {
           clearTimeout(id)
           this.sound.play('fall')
@@ -270,6 +224,7 @@ export class Game {
       if (this.grid.size === 0) {
         this.phase = 'won'
         this.sound.play('win')
+        this.spawnConfetti()
         return
       }
     } else {
@@ -278,17 +233,28 @@ export class Game {
     }
 
     this.checkLoss()
-    // Recompute targeting for the next shot after grid has changed
+    this.shooter.setTypePool(this.grid.getActiveTypes())
     this.recomputeTarget()
   }
 
-  /**
-   * Checks whether the lowest occupied row of the grid has crossed the danger
-   * line, and if so transitions to the `'lost'` phase.
-   *
-   * Called after every snap-and-resolve so that a newly placed hat that pushes
-   * the cluster past `DANGER_ROW_Y` is detected immediately.
-   */
+  private spawnConfetti(): void {
+    const COLORS = ['#ff6b6b', '#ffd93d', '#6bcb77', '#4d96ff', '#ff922b', '#cc5de8', '#20c997']
+    for (let i = 0; i < 80; i++) {
+      this.confetti.push({
+        x: Math.random() * CANVAS_WIDTH,
+        y: Math.random() * CANVAS_HEIGHT * 0.4,
+        vx: (Math.random() - 0.5) * 4,
+        vy: Math.random() * 2 + 1,
+        color: COLORS[i % COLORS.length],
+        rotation: Math.random() * Math.PI * 2,
+        rotationSpeed: (Math.random() - 0.5) * 0.2,
+        width: Math.random() * 8 + 5,
+        height: Math.random() * 4 + 3,
+        opacity: 1,
+      })
+    }
+  }
+
   private checkLoss(): void {
     if (this.grid.getLowestOccupiedY() > DANGER_ROW_Y) {
       this.phase = 'lost'
@@ -296,20 +262,7 @@ export class Game {
     }
   }
 
-  /**
-   * Handles a click (or tap) from the player.
-   *
-   * Unlocks the `AudioContext` on the first gesture (browser policy), then
-   * branches based on the current phase:
-   * - `menu`, `won`, `lost` → start a new game.
-   * - `playing` (no active projectile) → aim at `(x, y)` and fire.
-   * - Any other phase (e.g. `paused`) → ignore.
-   *
-   * @param x - Canvas-relative X coordinate of the click/tap.
-   * @param y - Canvas-relative Y coordinate of the click/tap.
-   */
   private handleShoot(x: number, y: number): void {
-    // Unlock AudioContext on first user gesture
     this.sound.resume()
 
     if (this.phase === 'menu' || this.phase === 'won' || this.phase === 'lost') {
@@ -322,39 +275,16 @@ export class Game {
     this.shooter.aimAt(x, y)
     this.projectile = this.shooter.fire()
     this.sound.play('shoot')
-    // Clear targeting preview while projectile is in flight
     this.targetCell = null
     this.targetGroup = new Set()
   }
 
-  /**
-   * Handles mouse/touch movement by updating the shooter's aim angle and
-   * refreshing the targeting overlay.
-   *
-   * Ignored when the game is not in the `'playing'` phase or while a
-   * projectile is already in flight.
-   *
-   * @param x - Canvas-relative X coordinate of the pointer.
-   * @param y - Canvas-relative Y coordinate of the pointer.
-   */
   private handleAim(x: number, y: number): void {
     if (this.phase !== 'playing' || this.projectile?.active) return
     this.shooter.aimAt(x, y)
     this.recomputeTarget()
   }
 
-  /**
-   * Handles a keyboard key press.
-   *
-   * - `p` / `Escape` — toggle between `'playing'` and `'paused'` phases;
-   *   resets `lastTimestamp` on resume to avoid a large delta spike.
-   * - `m` — toggle audio mute via {@link SoundEngine.toggleMute}.
-   * - `c` — toggle the targeting-assist cheat overlay; immediately
-   *   recomputes the predicted target for the current aim direction.
-   *
-   * @param key - Lowercase key string from the keyboard event (e.g. `'p'`,
-   *   `'m'`, `'c'`, `'escape'`).
-   */
   private handleKey(key: string): void {
     if (key === 'p' || key === 'escape') {
       if (this.phase === 'playing') {
@@ -371,22 +301,18 @@ export class Game {
       this.targetingEnabled = !this.targetingEnabled
       this.recomputeTarget()
     }
+    if (key === 'h') {
+      if (this.phase === 'playing' && !this.projectile?.active) {
+        this.shooter.hold()
+        this.sound.play(this.shooter.holdType !== null ? 'swap' : 'hold')
+        this.recomputeTarget()
+      }
+    }
+    if (key === 'b') {
+      this.colorBlindMode = !this.colorBlindMode
+    }
   }
 
-  /**
-   * Recomputes the targeting-assist overlay for the current shooter angle.
-   *
-   * Steps:
-   * 1. If targeting is disabled or a projectile is active, clears
-   *    `targetCell` and `targetGroup` and returns early.
-   * 2. Runs {@link simulateLanding} to find where the shot would land.
-   * 3. Temporarily places the current hat type at that cell and runs a full
-   *    BFS match search ({@link Grid.findMatchesAll}) to determine the
-   *    would-be group size, then removes the temporary hat.
-   *
-   * The result is stored in `targetCell` / `targetGroup` and passed through
-   * {@link buildRenderState} to {@link Renderer.drawTargeting} each frame.
-   */
   private recomputeTarget(): void {
     if (!this.targetingEnabled || this.projectile?.active) {
       this.targetCell = null
@@ -400,7 +326,6 @@ export class Game {
     )
 
     if (this.targetCell) {
-      // Temporarily place the hat to compute the would-be match group
       this.grid.setHat(this.targetCell, this.shooter.currentType)
       this.targetGroup = this.grid.findMatchesAll(this.targetCell, this.shooter.currentType)
       this.grid.removeHat(this.targetCell)
@@ -409,40 +334,27 @@ export class Game {
     }
   }
 
-  /**
-   * Resets all game state and begins a new round in the `'playing'` phase.
-   *
-   * Creates fresh {@link Grid} and {@link Shooter} instances, seeds the grid
-   * with `INITIAL_ROWS` of random hats, zeroes the score and combo, and
-   * clears any in-flight particles and targeting state.
-   */
   private startNewGame(): void {
     this.grid = new Grid()
     this.grid.fillInitialGrid(INITIAL_ROWS)
     this.shooter = new Shooter()
+    this.shooter.setTypePool(this.grid.getActiveTypes())
     this.projectile = null
     this.score = 0
     this.combo = 1
+    this.level = 0
     this.fallingHats = []
+    this.confetti = []
     this.targetCell = null
     this.targetGroup = new Set()
     this.shotsUntilAdvance = SHOTS_PER_ADVANCE
+    this.shakeFrames = 0
+    this.shakeX = 0
+    this.shakeY = 0
     this.phase = 'playing'
     this.lastTimestamp = performance.now()
   }
 
-  /**
-   * Assembles a {@link RenderState} snapshot from the current game state.
-   *
-   * This snapshot is the sole communication channel between the game logic
-   * layer and the renderer.  It is constructed every frame and passed
-   * directly to {@link Renderer.render}; the renderer reads it without
-   * mutating it.
-   *
-   * @returns A plain-object snapshot of all state needed to draw the current
-   *   frame, including phase, grid, shooter, projectile, particles, score,
-   *   and targeting data.
-   */
   private buildRenderState(): RenderState {
     return {
       phase: this.phase,
@@ -458,16 +370,16 @@ export class Game {
       targetCell: this.targetCell,
       targetGroup: this.targetGroup,
       shotsUntilAdvance: this.shotsUntilAdvance,
+      level: this.level,
+      holdType: this.shooter.holdType,
+      shakeX: this.shakeX,
+      shakeY: this.shakeY,
+      confetti: this.confetti,
+      colorBlindMode: this.colorBlindMode,
     }
   }
 
-  /**
-   * Tears down the game and releases all resources.
-   *
-   * Cancels the active `requestAnimationFrame` callback, detaches all input
-   * listeners, frees pre-rendered hat bitmaps and the background bitmap, and
-   * closes the audio context.  Safe to call at any point in the lifecycle.
-   */
+  /** Tears down the game and releases all resources. */
   destroy(): void {
     cancelAnimationFrame(this.animationId)
     this.input.destroy()

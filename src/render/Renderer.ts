@@ -1,7 +1,9 @@
 import {
   GamePhase,
   FallingHat,
+  ConfettiParticle,
   GridPos,
+  HatType,
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
   HAT_RADIUS,
@@ -15,93 +17,37 @@ import { HatRenderer } from './HatRenderer'
 
 /**
  * Snapshot of all game state required to produce a single frame.
- *
- * The {@link Renderer} is purely a display layer: it reads this struct and
- * never modifies it, which keeps rendering cleanly separated from game logic.
  */
 export interface RenderState {
-  /** Current phase of the game state machine (menu, playing, paused, won, lost). */
   phase: GamePhase
-
-  /** The hexagonal grid holding all placed hats. */
   grid: Grid
-
-  /** The bottom-of-screen cannon including its current aim angle and hat queue. */
   shooter: Shooter
-
-  /**
-   * The hat currently in flight, or `null` when no shot is active.
-   * `projectile.active` is `false` once it has snapped to the grid.
-   */
   projectile: Projectile | null
-
-  /**
-   * Hats that have been cleared from the grid and are animating off screen.
-   * Each entry carries its own physics state (position, velocity, opacity).
-   */
   fallingHats: FallingHat[]
-
-  /** Player's current score for the active game session. */
   score: number
-
-  /** All-time high score, persisted in `localStorage`. */
   highScore: number
-
-  /**
-   * Current consecutive-pop multiplier.
-   * Starts at 1, increments on each successful match, resets to 1 on a miss.
-   */
   combo: number
-
-  /** Whether game audio is currently muted. Shown as an indicator in the HUD. */
   muted: boolean
-
-  /**
-   * Whether the targeting-assist ("cheat") overlay is active.
-   * When `true`, a ghost hat and match-count badge are drawn at the predicted
-   * landing cell before the player fires.
-   */
   targeting: boolean
-
-  /**
-   * Grid cell the projectile is predicted to land on, or `null` when the
-   * simulation cannot determine a landing cell (e.g. no grid to hit).
-   * Only meaningful when `targeting` is `true`.
-   */
   targetCell: GridPos | null
-
-  /**
-   * Set of grid-key strings (`"row,col"`) for all same-type hats connected to
-   * the target cell, including the target cell itself.  Used by the targeting
-   * overlay to highlight the would-be match group before the player fires.
-   */
   targetGroup: Set<string>
-
-  /**
-   * Number of shots remaining before the entire hat cluster advances down by
-   * one row and a fresh row is added at the ceiling.
-   */
   shotsUntilAdvance: number
+  /** Current level (number of grid advances that have occurred this game). */
+  level: number
+  /** Hat type stashed in the hold slot, or `null` when the slot is empty. */
+  holdType: HatType | null
+  /** Horizontal canvas-shake offset in px for the current frame. */
+  shakeX: number
+  /** Vertical canvas-shake offset in px for the current frame. */
+  shakeY: number
+  /** Confetti particles spawned on the win screen. */
+  confetti: ConfettiParticle[]
+  /** Whether colorblind symbol overlays are drawn on top of each hat. */
+  colorBlindMode: boolean
 }
 
 /**
  * Stateless Canvas 2D renderer for Hat Trick.
- *
- * `Renderer` owns the `CanvasRenderingContext2D` and is the single point
- * responsible for every pixel drawn to the screen.  It is designed to be
- * called once per animation frame from the game loop:
- *
- * ```ts
- * renderer.render(buildRenderState())
- * ```
- *
- * The class holds no mutable game state of its own — the only internal state
- * is the pre-rendered `backgroundBitmap` created during {@link init}, which
- * is blitted each frame instead of being redrawn from scratch.
- *
- * Drawing is layered from back to front:
- * background → danger line → grid hats → falling hats →
- * aim line → targeting overlay → shooter → projectile → HUD → phase overlay.
  */
 export class Renderer {
   private readonly ctx: CanvasRenderingContext2D
@@ -115,13 +61,6 @@ export class Renderer {
     this.hatRenderer = hatRenderer
   }
 
-  /**
-   * Pre-renders the static starfield background to an `OffscreenCanvas` and
-   * converts it to an `ImageBitmap` for fast `drawImage` blitting.
-   *
-   * Must be `await`-ed before the first call to {@link render}.  If `render`
-   * is called before `init` completes, a plain solid-colour fallback is used.
-   */
   async init(): Promise<void> {
     const offscreen = new OffscreenCanvas(CANVAS_WIDTH, CANVAS_HEIGHT)
     const ctx = offscreen.getContext('2d')!
@@ -144,16 +83,6 @@ export class Renderer {
     this.backgroundBitmap = await createImageBitmap(offscreen)
   }
 
-  /**
-   * Draws a complete frame from the provided render state.
-   *
-   * Clears the canvas, then delegates to the appropriate private draw methods
-   * based on `state.phase`.  The menu screen is self-contained; all other
-   * phases share the background, grid, and shooter layers, with additional
-   * overlays composited on top for `paused`, `won`, and `lost`.
-   *
-   * @param state - Snapshot of game state for this frame.
-   */
   render(state: RenderState): void {
     const { ctx } = this
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
@@ -163,9 +92,13 @@ export class Renderer {
       return
     }
 
+    // Apply screen shake by translating the entire canvas for this frame
+    ctx.save()
+    ctx.translate(state.shakeX, state.shakeY)
+
     this.drawBackground()
     this.drawDangerLine()
-    this.drawGrid(state.grid)
+    this.drawGrid(state.grid, state.colorBlindMode)
     this.drawFallingHats(state.fallingHats)
 
     if (state.phase === 'playing' || state.phase === 'paused') {
@@ -181,44 +114,34 @@ export class Renderer {
           this.drawTargeting(state.grid, state.shooter, state.targetCell, state.targetGroup)
         }
       }
-      this.drawShooter(state.shooter)
+      this.drawShooter(state.shooter, state.holdType)
       if (state.projectile?.active) {
         this.drawProjectile(state.projectile)
       }
-      this.drawHUD(state.score, state.highScore, state.combo, state.muted, state.targeting, state.shotsUntilAdvance)
+      this.drawHUD(state.score, state.highScore, state.combo, state.muted, state.targeting, state.shotsUntilAdvance, state.level)
     }
 
     if (state.phase === 'paused') {
       this.drawPauseOverlay()
     } else if (state.phase === 'won') {
       this.drawEndScreen(true, state.score)
+      this.drawConfetti(state.confetti)
     } else if (state.phase === 'lost') {
       this.drawEndScreen(false, state.score)
     }
+
+    ctx.restore()
   }
 
-  /**
-   * Blits the pre-rendered background bitmap to the canvas.
-   *
-   * Falls back to a flat solid fill if {@link init} has not yet resolved.
-   */
   private drawBackground(): void {
     if (this.backgroundBitmap) {
       this.ctx.drawImage(this.backgroundBitmap, 0, 0)
       return
     }
-    // Fallback before init() completes
     this.ctx.fillStyle = '#0d0d2b'
     this.ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
   }
 
-  /**
-   * Draws the horizontal dashed red danger line at `DANGER_ROW_Y` and a
-   * small "DANGER" label to the right of it.
-   *
-   * The danger line marks the boundary that causes a loss if any hat
-   * descends below it.
-   */
   private drawDangerLine(): void {
     const { ctx } = this
     ctx.save()
@@ -230,7 +153,6 @@ export class Renderer {
     ctx.lineTo(CANVAS_WIDTH, DANGER_ROW_Y)
     ctx.stroke()
     ctx.setLineDash([])
-
     ctx.fillStyle = 'rgba(255, 60, 60, 0.4)'
     ctx.font = '11px monospace'
     ctx.textAlign = 'right'
@@ -238,42 +160,20 @@ export class Renderer {
     ctx.restore()
   }
 
-  /**
-   * Iterates all occupied cells in the grid and draws each hat at its
-   * pixel-space position using {@link HatRenderer}.
-   *
-   * @param grid - The current game grid to render.
-   */
-  private drawGrid(grid: Grid): void {
+  private drawGrid(grid: Grid, colorBlindMode: boolean): void {
     for (const hat of grid.iterHats()) {
       const { x, y } = grid.toPixel(hat.pos)
       this.hatRenderer.drawHat(this.ctx, hat.type, x, y)
+      if (colorBlindMode) this.drawSymbol(hat.type, x, y)
     }
   }
 
-  /**
-   * Draws all hats that are currently animating off screen after being popped
-   * or disconnected.  Each hat is rendered at its current physics position
-   * with its current opacity applied.
-   *
-   * @param hats - Array of in-flight falling hat particles.
-   */
   private drawFallingHats(hats: FallingHat[]): void {
     for (const hat of hats) {
       this.hatRenderer.drawHat(this.ctx, hat.type, hat.x, hat.y, hat.opacity)
     }
   }
 
-  /**
-   * Draws the dashed aim line that shows the projectile's trajectory from
-   * the shooter to the first bounce or landing point.
-   *
-   * The line is not drawn if fewer than two points are supplied (e.g. the
-   * angle is straight up and no reflection is needed).
-   *
-   * @param points - Ordered list of waypoints along the aim path, including
-   *   wall-reflection corners, produced by {@link computeAimLine}.
-   */
   private drawAimLine(points: Array<{ x: number; y: number }>): void {
     if (points.length < 2) return
     const { ctx } = this
@@ -281,7 +181,6 @@ export class Renderer {
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)'
     ctx.lineWidth = 1.5
     ctx.setLineDash([4, 8])
-    ctx.lineDashOffset = 0
     ctx.beginPath()
     ctx.moveTo(points[0].x, points[0].y)
     for (let i = 1; i < points.length; i++) {
@@ -292,24 +191,10 @@ export class Renderer {
     ctx.restore()
   }
 
-  /**
-   * Draws the shooter cannon and its hat previews.
-   *
-   * Renders three distinct elements:
-   * 1. **Barrel** — a rounded line rotated to match `shooter.angleDeg`.
-   * 2. **Base platform** — an ellipse beneath the barrel pivot.
-   * 3. **Current hat** — the hat type sitting in the chamber, drawn centred
-   *    on the base.
-   * 4. **Next hat preview** — a small labelled box in the bottom-left corner
-   *    showing which hat will be loaded after the current one fires.
-   *
-   * @param shooter - Shooter state providing position, angle, and hat types.
-   */
-  private drawShooter(shooter: Shooter): void {
+  private drawShooter(shooter: Shooter, holdType: HatType | null): void {
     const { ctx } = this
     const { x, y, angleDeg } = shooter
 
-    // Barrel
     const barrelLen = 36
     const rad = (angleDeg * Math.PI) / 180
     const bx = x + Math.sin(rad) * barrelLen
@@ -324,7 +209,6 @@ export class Renderer {
     ctx.lineTo(bx, by)
     ctx.stroke()
 
-    // Base platform
     ctx.fillStyle = '#334'
     ctx.strokeStyle = '#556'
     ctx.lineWidth = 2
@@ -332,10 +216,8 @@ export class Renderer {
     ctx.ellipse(x, y + 6, 28, 12, 0, 0, Math.PI * 2)
     ctx.fill()
     ctx.stroke()
-
     ctx.restore()
 
-    // Current hat in chamber (centered on base)
     this.hatRenderer.drawHat(ctx, shooter.currentType, x, y)
 
     // Next hat preview (bottom-left)
@@ -359,36 +241,45 @@ export class Renderer {
     ctx.restore()
 
     this.hatRenderer.drawHat(ctx, shooter.nextType, previewX, previewY - 2)
+
+    // Hold slot (bottom-right)
+    const holdX = CANVAS_WIDTH - 42
+    const holdY = CANVAS_HEIGHT - 42
+    ctx.save()
+    ctx.fillStyle = holdType !== null ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.25)'
+    ctx.strokeStyle = holdType !== null ? '#664' : '#334'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.roundRect(holdX - 36, holdY - 36, 72, 72, 8)
+    ctx.fill()
+    ctx.stroke()
+    ctx.restore()
+
+    ctx.save()
+    ctx.fillStyle = holdType !== null ? 'rgba(255,220,100,0.7)' : 'rgba(255,255,255,0.25)'
+    ctx.font = '10px monospace'
+    ctx.textAlign = 'center'
+    ctx.fillText('HOLD H', holdX, holdY + 30)
+    ctx.restore()
+
+    if (holdType !== null) {
+      this.hatRenderer.drawHat(ctx, holdType, holdX, holdY - 2)
+    } else {
+      ctx.save()
+      ctx.fillStyle = 'rgba(255,255,255,0.1)'
+      ctx.font = '22px monospace'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('H', holdX, holdY - 2)
+      ctx.textBaseline = 'alphabetic'
+      ctx.restore()
+    }
   }
 
-  /**
-   * Draws the hat projectile at its current pixel position while it is in
-   * flight.
-   *
-   * @param proj - The active projectile whose position is read each frame.
-   */
   private drawProjectile(proj: Projectile): void {
     this.hatRenderer.drawHat(this.ctx, proj.type, proj.x, proj.y)
   }
 
-  /**
-   * Draws the targeting-assist (cheat) overlay when it is enabled.
-   *
-   * The overlay has two parts:
-   * - **Group highlight** — a glowing ring drawn around every hat in the
-   *   connected same-type group that would be matched if the shot lands at
-   *   `targetCell`.  Green when the group is large enough to pop
-   *   (`>= MIN_MATCH_COUNT`), amber when it is not.
-   * - **Ghost landing** — a semi-transparent ghost hat drawn at `targetCell`
-   *   with a dashed landing ring and a small badge showing the current group
-   *   size (prefixed with ✓ when it will pop).
-   *
-   * @param grid        - Current grid, used for pixel-space lookups.
-   * @param shooter     - Provides the hat type being aimed for the ghost sprite.
-   * @param targetCell  - Predicted landing cell, or `null` if undetermined.
-   * @param targetGroup - Set of grid-key strings (`"row,col"`) forming the
-   *   connected same-type group including `targetCell`.
-   */
   private drawTargeting(
     grid: Grid,
     shooter: Shooter,
@@ -400,9 +291,7 @@ export class Renderer {
     const ringColor = willPop ? 'rgba(80,255,120,0.85)' : 'rgba(255,200,60,0.55)'
     const glowColor = willPop ? 'rgba(80,255,120,0.3)' : 'rgba(255,200,60,0.15)'
 
-    // Highlight each hat in the connected group
     for (const key of targetGroup) {
-      // Skip the target cell itself — it'll get the ghost treatment below
       if (targetCell && key === `${targetCell.row},${targetCell.col}`) continue
       const [row, col] = key.split(',').map(Number)
       const { x, y } = grid.toPixel({ row, col })
@@ -415,18 +304,14 @@ export class Renderer {
       ctx.beginPath()
       ctx.arc(x, y, HAT_RADIUS + 2, 0, Math.PI * 2)
       ctx.stroke()
-
-      // Subtle fill tint
       ctx.fillStyle = glowColor
       ctx.fill()
       ctx.restore()
     }
 
-    // Ghost hat at landing cell
     if (targetCell) {
       const { x, y } = grid.toPixel(targetCell)
 
-      // Landing ring
       ctx.save()
       ctx.shadowColor = willPop ? 'rgba(80,255,120,0.9)' : 'rgba(255,200,60,0.7)'
       ctx.shadowBlur = 18
@@ -439,22 +324,18 @@ export class Renderer {
       ctx.setLineDash([])
       ctx.restore()
 
-      // Ghost hat sprite
       this.hatRenderer.drawHat(ctx, shooter.currentType, x, y, 0.35)
 
-      // Match count badge
       const count = targetGroup.size
       if (count > 0) {
         const label = willPop ? `✓ ${count}` : `${count}`
         ctx.save()
         const badgeX = x + 18
         const badgeY = y - 20
-
         ctx.fillStyle = willPop ? 'rgba(30,180,80,0.9)' : 'rgba(160,120,0,0.85)'
         ctx.beginPath()
         ctx.roundRect(badgeX - 2, badgeY - 13, label.length * 8 + 4, 16, 4)
         ctx.fill()
-
         ctx.fillStyle = '#fff'
         ctx.font = 'bold 11px monospace'
         ctx.textAlign = 'left'
@@ -464,31 +345,10 @@ export class Renderer {
     }
   }
 
-  /**
-   * Draws the heads-up display elements overlaid on the gameplay canvas.
-   *
-   * Renders:
-   * - **Score panel** (top-right) — current score in large text with the
-   *   all-time best score in smaller text beneath it.
-   * - **Combo indicator** (top-left) — shown only when `combo > 1`; colour
-   *   intensifies (orange → gold) as the multiplier rises.
-   * - **Mute indicator** (bottom-left) — shows current mute state with an
-   *   icon; dimmed when unmuted, red when muted.
-   * - **Targeting indicator** (bottom-left, below mute) — shows whether the
-   *   targeting-assist cheat is on; green when active, dimmed otherwise.
-   *
-   * @param score             - Player's current score.
-   * @param highScore         - All-time high score.
-   * @param combo             - Current combo multiplier.
-   * @param muted             - Whether audio is muted.
-   * @param targeting         - Whether targeting assist is enabled.
-   * @param shotsUntilAdvance - Shots remaining before the grid advances down.
-   */
-  private drawHUD(score: number, highScore: number, combo: number, muted: boolean, targeting: boolean, shotsUntilAdvance: number): void {
+  private drawHUD(score: number, highScore: number, combo: number, muted: boolean, targeting: boolean, shotsUntilAdvance: number, level: number): void {
     const { ctx } = this
     ctx.save()
 
-    // Score panel background
     ctx.fillStyle = 'rgba(0,0,0,0.4)'
     ctx.beginPath()
     ctx.roundRect(CANVAS_WIDTH - 150, 8, 142, 60, 6)
@@ -503,7 +363,6 @@ export class Renderer {
     ctx.font = '11px monospace'
     ctx.fillText(`BEST ${highScore.toLocaleString()}`, CANVAS_WIDTH - 12, 58)
 
-    // Combo indicator
     if (combo > 1) {
       ctx.fillStyle = combo >= 4 ? '#ffcc00' : '#ff8844'
       ctx.font = `bold ${14 + combo}px monospace`
@@ -511,7 +370,6 @@ export class Renderer {
       ctx.fillText(`×${combo} COMBO`, 12, 38)
     }
 
-    // Mute / targeting indicators (bottom-left)
     ctx.font = '13px monospace'
     ctx.textAlign = 'left'
     ctx.fillStyle = muted ? 'rgba(255,80,80,0.8)' : 'rgba(255,255,255,0.28)'
@@ -520,38 +378,32 @@ export class Renderer {
     ctx.fillStyle = targeting ? 'rgba(80,255,120,0.9)' : 'rgba(255,255,255,0.28)'
     ctx.fillText(targeting ? '🎯 C' : '◎ C', 12, CANVAS_HEIGHT - 16)
 
-    // Advance countdown (top-left, below score area)
+    // Level + advance countdown (top-left)
+    ctx.font = '11px monospace'
+    ctx.textAlign = 'left'
+    ctx.fillStyle = 'rgba(200,200,255,0.6)'
+    ctx.fillText(`LEVEL ${level + 1}`, 12, 20)
+
     const advanceColor = shotsUntilAdvance <= 2
       ? 'rgba(255,80,80,0.95)'
       : shotsUntilAdvance <= 4
         ? 'rgba(255,180,60,0.9)'
         : 'rgba(180,220,255,0.55)'
     ctx.fillStyle = advanceColor
-    ctx.font = '11px monospace'
-    ctx.textAlign = 'left'
-    ctx.fillText(`▼ ADVANCE IN: ${shotsUntilAdvance}`, 12, 20)
+    ctx.fillText(`▼ ADVANCE IN: ${shotsUntilAdvance}`, 12, 34)
 
     ctx.restore()
   }
 
-  /**
-   * Draws the full-canvas main menu screen shown before the first game and
-   * after the page is loaded.
-   *
-   * Includes: gradient background, title ("HAT TRICK"), tagline, a
-   * "Click to Start" call-to-action, and a brief control hint.
-   */
   private drawMenu(): void {
     const { ctx } = this
 
-    // Background
     const grad = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT)
     grad.addColorStop(0, '#0a0a20')
     grad.addColorStop(1, '#1a0a30')
     ctx.fillStyle = grad
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
 
-    // Title
     ctx.save()
     ctx.textAlign = 'center'
     ctx.shadowColor = '#8844ff'
@@ -577,75 +429,132 @@ export class Renderer {
     ctx.fillStyle = 'rgba(255,255,255,0.35)'
     ctx.font = '13px monospace'
     ctx.fillText('Move mouse to aim · Click to shoot', CANVAS_WIDTH / 2, 480)
-    ctx.fillText('P pause · M mute · C targeting cheat', CANVAS_WIDTH / 2, 500)
+    ctx.fillText('P pause · M mute · C target · H hold · B colorblind', CANVAS_WIDTH / 2, 500)
 
     ctx.restore()
   }
 
-  /**
-   * Composites a semi-transparent dark overlay with a "PAUSED" message on
-   * top of the already-drawn gameplay frame.
-   *
-   * Called only when `phase === 'paused'`, after all gameplay elements have
-   * been drawn, so the grid and shooter remain dimly visible underneath.
-   */
   private drawPauseOverlay(): void {
     const { ctx } = this
     ctx.save()
     ctx.fillStyle = 'rgba(0,0,0,0.55)'
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
-
     ctx.textAlign = 'center'
     ctx.fillStyle = '#ffffff'
     ctx.font = 'bold 48px monospace'
     ctx.fillText('PAUSED', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 20)
-
     ctx.fillStyle = 'rgba(255,255,255,0.5)'
     ctx.font = '18px monospace'
     ctx.fillText('Press P to resume', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 30)
     ctx.restore()
   }
 
-  /**
-   * Draws the win or game-over end screen over the current frame.
-   *
-   * The overlay opacity, headline colour, and text all differ depending on
-   * `won`.  A "Click to play again" prompt is shown beneath the final score.
-   *
-   * @param won   - `true` to show the win screen; `false` for game over.
-   * @param score - The player's final score for this session.
-   */
   private drawEndScreen(won: boolean, score: number): void {
     const { ctx } = this
     ctx.save()
     ctx.fillStyle = `rgba(0,0,0,${won ? 0.5 : 0.65})`
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
-
     ctx.textAlign = 'center'
     ctx.shadowColor = won ? '#44ff88' : '#ff4444'
     ctx.shadowBlur = 20
-
     ctx.fillStyle = won ? '#44ff88' : '#ff6666'
     ctx.font = 'bold 52px monospace'
     ctx.fillText(won ? 'YOU WIN!' : 'GAME OVER', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 60)
-
     ctx.shadowBlur = 0
     ctx.fillStyle = '#ffffff'
     ctx.font = 'bold 28px monospace'
     ctx.fillText(`Score: ${score.toLocaleString()}`, CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2)
-
     ctx.fillStyle = 'rgba(255,255,255,0.55)'
     ctx.font = '18px monospace'
     ctx.fillText('Click to play again', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 + 60)
     ctx.restore()
   }
 
+  /** Draws confetti particles as small rotated filled rectangles. */
+  private drawConfetti(particles: ConfettiParticle[]): void {
+    const { ctx } = this
+    for (const p of particles) {
+      ctx.save()
+      ctx.globalAlpha = p.opacity
+      ctx.translate(p.x, p.y)
+      ctx.rotate(p.rotation)
+      ctx.fillStyle = p.color
+      ctx.fillRect(-p.width / 2, -p.height / 2, p.width, p.height)
+      ctx.restore()
+    }
+  }
+
   /**
-   * Releases the pre-rendered background bitmap and frees its GPU memory.
-   *
-   * Should be called when the game is torn down (e.g. the canvas element is
-   * removed from the DOM) to avoid memory leaks.
+   * Draws a small white symbol on a hat for colorblind accessibility.
+   * Each HatType gets a distinct shape centered on the hat's crown area.
    */
+  private drawSymbol(type: HatType, cx: number, cy: number): void {
+    const { ctx } = this
+    const sx = cx
+    const sy = cy - 6
+    const r = 7
+
+    ctx.save()
+    ctx.shadowColor = 'rgba(0,0,0,0.8)'
+    ctx.shadowBlur = 3
+    ctx.fillStyle = 'rgba(255,255,255,0.92)'
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)'
+    ctx.lineWidth = 2.5
+    ctx.lineCap = 'round'
+
+    switch (type) {
+      case 0: // TOP_HAT — triangle
+        ctx.beginPath()
+        ctx.moveTo(sx, sy - r)
+        ctx.lineTo(sx + r * 0.87, sy + r * 0.5)
+        ctx.lineTo(sx - r * 0.87, sy + r * 0.5)
+        ctx.closePath()
+        ctx.fill()
+        break
+      case 1: // FEDORA — circle
+        ctx.beginPath()
+        ctx.arc(sx, sy, r * 0.75, 0, Math.PI * 2)
+        ctx.fill()
+        break
+      case 2: // COWBOY — square
+        ctx.fillRect(sx - r * 0.72, sy - r * 0.72, r * 1.44, r * 1.44)
+        break
+      case 3: // WITCH — X
+        ctx.beginPath()
+        ctx.moveTo(sx - r * 0.7, sy - r * 0.7); ctx.lineTo(sx + r * 0.7, sy + r * 0.7)
+        ctx.moveTo(sx + r * 0.7, sy - r * 0.7); ctx.lineTo(sx - r * 0.7, sy + r * 0.7)
+        ctx.stroke()
+        break
+      case 4: // BASEBALL_CAP — diamond
+        ctx.beginPath()
+        ctx.moveTo(sx, sy - r)
+        ctx.lineTo(sx + r * 0.72, sy)
+        ctx.lineTo(sx, sy + r)
+        ctx.lineTo(sx - r * 0.72, sy)
+        ctx.closePath()
+        ctx.fill()
+        break
+      case 5: // BERET — plus
+        ctx.beginPath()
+        ctx.moveTo(sx, sy - r); ctx.lineTo(sx, sy + r)
+        ctx.moveTo(sx - r, sy); ctx.lineTo(sx + r, sy)
+        ctx.stroke()
+        break
+      case 6: // PROPELLER — 3-spoke burst
+        for (let i = 0; i < 3; i++) {
+          const angle = (i * Math.PI * 2) / 3 - Math.PI / 2
+          ctx.beginPath()
+          ctx.moveTo(sx, sy)
+          ctx.lineTo(sx + Math.cos(angle) * r, sy + Math.sin(angle) * r)
+          ctx.stroke()
+        }
+        break
+    }
+
+    ctx.restore()
+  }
+
+  /** Releases the pre-rendered background bitmap. */
   destroy(): void {
     this.backgroundBitmap?.close()
     this.backgroundBitmap = null
